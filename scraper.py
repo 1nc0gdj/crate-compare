@@ -557,8 +557,8 @@ def upsert(con, L: Listing):
         """INSERT INTO listings (release_id, retailer_id, url, price, currency, status, preview_url)
            VALUES (?,?,?,?,?,?,?)
            ON CONFLICT(release_id, retailer_id) DO UPDATE SET
-             url=excluded.url, price=excluded.price, status=excluded.status,
-             preview_url=excluded.preview_url, last_seen=datetime('now')""",
+             url=excluded.url, price=excluded.price, currency=excluded.currency,
+             status=excluded.status, preview_url=excluded.preview_url, last_seen=datetime('now')""",
         (release_id, retailer_id, L.url, L.price, L.currency, L.status, L.preview_url),
     )
     listing_id = con.execute(
