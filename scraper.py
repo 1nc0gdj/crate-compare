@@ -43,6 +43,7 @@ class Listing:
     release_date: str | None = None   # ISO yyyy-mm-dd
     previews: list | None = None      # [{'title': ..., 'url': ...}] direct audio links
     label_url: str | None = None      # the label's own page at this shop
+    genres: list | None = None        # the shop's own genre labels, exactly as written there
 
 
 def norm_cat(cat: str | None) -> str | None:
@@ -161,6 +162,13 @@ class JunoAdapter(Adapter):
         label = next((a for a in node.select('a[href*="/labels/"]')
                       if "?" not in a["href"] and a.get_text(strip=True)), None)
         preview = node.select_one('a[href*="/MP3/"]')
+        genres = []
+        mark = node.find(string=re.compile(r"Add to playlist"))
+        if mark:
+            cand = mark.find_next(string=lambda x: x.strip() and "Add to playlist" not in x)
+            if (cand and len(cand.strip()) <= 45 and not cand.strip().startswith("Review")
+                    and not cand.find_all_previous("a", href=re.compile("/MP3/"))):
+                genres = [cand.strip()]
         previews = []
         for n, a in enumerate(node.select('a[href*="/MP3/"]'), 1):
             t = a.find_next(string=lambda x: x.strip())   # the track title follows its play link
@@ -187,6 +195,7 @@ class JunoAdapter(Adapter):
             release_date=release_date,
             previews=previews or None,
             label_url=urljoin(self.BASE, label["href"]) if label else None,
+            genres=genres or None,
         )
 
 
@@ -293,6 +302,21 @@ class DeejayAdapter(Adapter):
             status = "unknown"
             print(f"  ? could not read the stock status for '{title}'. End of its text: {text[-160:]}")
 
+        genres, main, has_sub = [], None, False
+        for a in node.select("a[href]"):
+            m = re.search(r"/m_([^/]+)/sm_[^/]+(/substyles_\d+)?$", a["href"])
+            name = a.get_text(strip=True)
+            if not m or not name:
+                continue
+            if m.group(2) is None:                       # a main genre
+                if main and not has_sub:
+                    genres.append(main)
+                main, has_sub = name, False
+            else:                                        # a sub-style of the current main genre
+                genres.append(f"{main} / {name}" if main else name)
+                has_sub = True
+        if main and not has_sub:
+            genres.append(main)
         previews = []
         for a in node.select('a[id^="playTrack_"]'):
             m = re.match(r"playTrack_(\d+)_([a-z0-9]+)$", a.get("id", ""))
@@ -312,6 +336,7 @@ class DeejayAdapter(Adapter):
             artwork_url=img["src"] if img and img.has_attr("src") else None,
             release_date=release_date, previews=previews or None,
             label_url=urljoin(self.BASE, label_el["href"]) if label_el else None,
+            genres=genres or None,
         )
 
 
@@ -462,6 +487,12 @@ class YoyakuAdapter(Adapter):
             m = re.search(r"(?:(\d+)\s*x\s*)?LP\b", tail)
             fmt = ((m.group(1) + "x" if m.group(1) else "") + "LP") if m else None
 
+        styles = []
+        for a in node.select('a[href*="/style/"]'):
+            name = a.get_text(strip=True)
+            if name and name not in styles:
+                styles.append(name)
+
         prices = self.PRICE.findall(text)
         price = float(prices[-1].replace(".", "").replace(",", ".")) if prices else None
 
@@ -480,7 +511,7 @@ class YoyakuAdapter(Adapter):
             retailer_slug=self.slug, title=title, artists=artists, label=label,
             catalogue_no=norm_cat(cat), format=fmt, price=price, currency="EUR",
             status=status, url=url, preview_url=url, artwork_url=art, release_date=None,
-            label_url=urljoin(self.BASE, label_el["href"]),
+            label_url=urljoin(self.BASE, label_el["href"]), genres=styles or None,
         )
 
 
@@ -524,8 +555,10 @@ def connect():
 def init_db():
     con = connect()
     con.executescript(Path("schema.sql").read_text())
-    if "previews" not in [r["name"] for r in con.execute("PRAGMA table_info(listings)")]:
-        con.execute("ALTER TABLE listings ADD COLUMN previews TEXT")   # older databases
+    have = [r["name"] for r in con.execute("PRAGMA table_info(listings)")]
+    for col in ("previews", "genres"):
+        if col not in have:
+            con.execute(f"ALTER TABLE listings ADD COLUMN {col} TEXT")   # older databases
     con.execute(
         """INSERT OR IGNORE INTO retailers
            (slug, name, base_url, currency, ship_first_item, ship_extra_item, free_ship_over)
@@ -633,14 +666,15 @@ def upsert(con, L: Listing):
 
     # 2) Upsert this retailer's listing.
     con.execute(
-        """INSERT INTO listings (release_id, retailer_id, url, price, currency, status, preview_url, previews)
-           VALUES (?,?,?,?,?,?,?,?)
+        """INSERT INTO listings (release_id, retailer_id, url, price, currency, status, preview_url, previews, genres)
+           VALUES (?,?,?,?,?,?,?,?,?)
            ON CONFLICT(release_id, retailer_id) DO UPDATE SET
              url=excluded.url, price=excluded.price, currency=excluded.currency,
              status=excluded.status, preview_url=excluded.preview_url,
-             previews=COALESCE(excluded.previews, previews), last_seen=datetime('now')""",
+             previews=COALESCE(excluded.previews, previews), genres=COALESCE(excluded.genres, genres),
+             last_seen=datetime('now')""",
         (release_id, retailer_id, L.url, L.price, L.currency, L.status, L.preview_url,
-         json.dumps(L.previews) if L.previews else None),
+         json.dumps(L.previews) if L.previews else None, json.dumps(L.genres) if L.genres else None),
     )
     listing_id = con.execute(
         "SELECT id FROM listings WHERE release_id=? AND retailer_id=?",
@@ -890,6 +924,51 @@ def audio_check():
         print("  error:", e)
 
 
+def norm_genre(s):
+    """'Minimal / Tech House' and 'Minimal/Tech House' count as the same label."""
+    return re.sub(r"\s+", " ", re.sub(r"\s*/\s*", "/", s.strip().lower()))
+
+
+def load_genre_map():
+    """genres.json: the simplified genre list, and which shop labels belong to which."""
+    p = Path("genres.json")
+    cfg = json.loads(p.read_text()) if p.exists() else {"genres": [], "map": {}}
+    return cfg, {k.split(":", 1)[0].lower() + ":" + norm_genre(k.split(":", 1)[1]): v for k, v in cfg["map"].items()}
+
+
+def simplified_genres(shop, raw_labels, gmap):
+    """The simplified genres for one listing's raw labels (empty if none are mapped yet)."""
+    out = []
+    for raw in raw_labels or []:
+        for g in gmap.get(f"{shop}:{norm_genre(raw)}", []):
+            if g not in out:
+                out.append(g)
+    return out
+
+
+def genre_report(only_unmapped=True):
+    """Count every raw genre label per shop, and say which ones genres.json doesn't cover yet."""
+    cfg, gmap = load_genre_map()
+    con = connect()
+    rows = con.execute("""SELECT rt.slug AS shop, li.genres FROM listings li
+                          JOIN retailers rt ON rt.id = li.retailer_id WHERE li.genres IS NOT NULL""").fetchall()
+    counts, total, covered = {}, len(rows), 0
+    for r in rows:
+        raws = json.loads(r["genres"])
+        if simplified_genres(r["shop"], raws, gmap):
+            covered += 1
+        for raw in raws:
+            counts[(r["shop"], raw)] = counts.get((r["shop"], raw), 0) + 1
+    all_listings = con.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
+    print(f"\nGenres: {total} of {all_listings} listings have shop genre labels; {covered} have at least one mapped to your simplified list.")
+    unmapped = {k: n for k, n in counts.items() if f"{k[0]}:{norm_genre(k[1])}" not in gmap}
+    show = unmapped if only_unmapped else counts
+    print(f"{'Labels not in genres.json yet' if only_unmapped else 'All shop genre labels'} ({len(show)}):")
+    for (shop, raw), n in sorted(show.items(), key=lambda kv: (kv[0][0], -kv[1], kv[0][1])):
+        mapped = gmap.get(f"{shop}:{norm_genre(raw)}")
+        print(f"  {shop:<7} {raw:<34} x{n:<4}" + (f" -> {', '.join(mapped)}" if mapped else ""))
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "init":
@@ -898,9 +977,12 @@ if __name__ == "__main__":
         audio_check()
     elif cmd == "compare":
         compare()
+    elif cmd == "genres":
+        genre_report(only_unmapped=False)
     elif cmd == "all":
         for slug in ADAPTERS:
             run(slug)
+        genre_report()
     elif cmd in ADAPTERS:
         run(cmd)
     else:

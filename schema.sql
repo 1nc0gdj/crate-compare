@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS listings (
   status       TEXT NOT NULL DEFAULT 'in_stock'
                CHECK (status IN ('in_stock','preorder','sold_out','unknown')),
   previews     TEXT,         -- JSON list of {title, url} direct audio links, when a shop offers them
+  genres       TEXT,         -- JSON list of the shop's own genre labels
   preview_url  TEXT,         -- retailer's player page or audio URL; link out, don't host
   first_seen   TEXT NOT NULL DEFAULT (datetime('now')),
   last_seen    TEXT NOT NULL DEFAULT (datetime('now')),
