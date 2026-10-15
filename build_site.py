@@ -14,6 +14,14 @@ import scraper
 AVAILABLE = ("in_stock", "preorder")
 
 
+def display_name(name):
+    """'Delmark US' -> 'Delmark': drop a trailing country word the shops add to label names."""
+    words = name.split()
+    while len(words) > 1 and words[-1].lower() in scraper.COUNTRY_WORDS:
+        words.pop()
+    return " ".join(words)
+
+
 def build():
     rates = scraper.get_rates()
     con = scraper.connect()
@@ -28,14 +36,14 @@ def build():
            LEFT JOIN labels lb ON lb.id = r.label_id
            JOIN listings li ON li.release_id = r.id
            JOIN retailers rt ON rt.id = li.retailer_id
-           WHERE r.label_id IN (SELECT entity_id FROM follows WHERE entity_type = 'label')
+           WHERE r.label_id IS NOT NULL
            ORDER BY r.id"""
     ).fetchall()
 
     releases = {}
     for r in rows:
         rel = releases.setdefault(r["id"], {
-            "title": r["title"], "artists": r["artists"] or "", "label": r["label"],
+            "title": r["title"], "artists": r["artists"] or "", "label": r["label"], "lkey": scraper.name_key(r["label"]),
             "cat": r["catalogue_no"] or "", "format": r["format"] or "",
             "date": r["release_date"] or "", "art": r["artwork_url"] or "", "added": "", "offers": [],
         })
@@ -59,7 +67,20 @@ def build():
         out.append(rel)
     out.sort(key=lambda x: x["date"], reverse=True)
 
+    # Labels: one entry each, with a clean name, a release count, and whether you track its full catalogue
+    seed = {scraper.name_key(f["name"]): f["name"] for f in scraper.load_follows()}
+    names, counts = {}, {}
+    for rel in out:
+        k = rel["lkey"]
+        counts[k] = counts.get(k, 0) + 1
+        names.setdefault(k, seed.get(k) or display_name(rel["label"]))
+    for rel in out:
+        rel["label"] = names[rel["lkey"]]
+    labels = sorted(({"key": k, "name": names[k], "n": counts[k], "full": k in seed} for k in counts),
+                    key=lambda l: (-l["n"], l["name"].lower()))
+
     data = {
+        "labels": labels, "defaults": list(seed),
         "generated": date.today().isoformat(),
         "gbp": round(rates["GBP"], 2), "eur": round(rates["EUR"], 2),
         "releases": out,
@@ -159,6 +180,22 @@ button.listen{font:inherit;font-size:.82rem;background:none;border:0;padding:0;c
 .pseek input{flex:1;min-width:0;accent-color:var(--sticker)}
 body.has-player{padding-bottom:5.5rem}
 @media (max-width:700px){.player{grid-template-columns:3.2rem minmax(0,1fr) auto auto}.pseek{grid-column:1/-1}body.has-player{padding-bottom:8rem}}
+button.manage{font:inherit;padding:.3rem .7rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;font-weight:600}
+dialog{border:1px solid var(--ink);background:var(--paper);color:var(--ink);padding:0;width:min(40rem,calc(100vw - 2rem));max-height:85vh;font-family:var(--font)}
+dialog[open]{display:flex;flex-direction:column}
+dialog::backdrop{background:rgba(21,38,44,.55)}
+.mhead{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:1rem 1.2rem .4rem}
+#mtitle{margin:0;font-size:1.4rem;font-weight:800;font-stretch:115%}
+.mnote{margin:0;padding:0 1.2rem .7rem;color:var(--dim);font-size:.9rem}
+.mtools{display:flex;flex-wrap:wrap;gap:.6rem 1.2rem;align-items:center;padding:.4rem 1.2rem .9rem;border-bottom:1px solid var(--ink)}
+.mtools label{display:flex;gap:.5rem;align-items:center}
+#mlist{list-style:none;margin:0;padding:0 1.2rem 1rem;overflow:auto}
+#mlist li{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.6rem 0;border-bottom:1px solid var(--rule)}
+.mname{font-weight:700;display:block}
+.mmeta{display:block;color:var(--dim);font-size:.82rem}
+.followbtn{font:inherit;font-weight:700;padding:.3rem .8rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;min-width:6.5rem}
+.followbtn[aria-pressed=true]{background:var(--ink);color:var(--paper)}
+.followbtn:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
 footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max-width:70ch}
 </style>
 </head>
@@ -172,7 +209,8 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
   <span id="count" aria-live="polite"></span>
   <div class="controls">
     <input type="search" id="q" placeholder="Search artist, title or catalogue number" aria-label="Search artist, title or catalogue number">
-    <details class="multi" id="labels"><summary>All labels</summary><div class="panel" id="labelpanel"></div></details>
+    <button type="button" class="manage" id="manageBtn">Manage labels</button>
+    <details class="multi" id="labels"><summary>All my labels</summary><div class="panel" id="labelpanel"></div></details>
     <label>Shop <select id="shop"></select></label>
     <label>Format <select id="format"></select></label>
     <label>Sort <select id="sort"></select></label>
@@ -182,6 +220,12 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 <main class="grid" id="grid"></main>
 <p class="empty" id="empty" hidden>No releases match. Choose All to see everything.</p>
 <footer>Totals are the price of one record plus shipping to Sydney, converted to Australian dollars. Shipping per record drops when you buy several from the same shop.</footer>
+<dialog id="manage" aria-labelledby="mtitle">
+  <div class="mhead"><h2 id="mtitle">All labels</h2><button type="button" class="followbtn" id="mclose">Done</button></div>
+  <p class="mnote">Follow a label to put its releases on your home page. Labels marked "full catalogue" are tracked in full. For the others you see what the shops' new-release pages have caught.</p>
+  <div class="mtools"><input type="search" id="mq" placeholder="Search labels" aria-label="Search labels"><label><input type="checkbox" id="monly"> Only labels I follow</label></div>
+  <ul id="mlist"></ul>
+</dialog>
 <div class="player" id="player" role="region" aria-label="Preview player" hidden>
   <img id="pimg" alt="" hidden>
   <div><div class="ptrack" id="ptrack"></div><div class="psub" id="psub"></div></div>
@@ -212,6 +256,10 @@ try {
   since = v.since;
 } catch (e) {}
 const isNew = r => since != null && r.addedMs > since;
+// The labels you follow decide what's on the home page. Saved in this browser; the first visit starts with the defaults.
+const FKEY = "crate-compare-follows";
+let followed = new Set(D.defaults);
+try { const saved = localStorage.getItem(FKEY); if (saved) followed = new Set(JSON.parse(saved)); } catch (e) {}
 const money = n => "A$" + n.toFixed(2);
 const nice = s => new Date(s + "T00:00:00").toLocaleDateString("en-AU", {day:"numeric", month:"short", year:"numeric"});
 const safe = u => /^https?:\/\//.test(u || "") ? u : null;
@@ -240,21 +288,27 @@ const uniq = f => [...new Set(D.releases.map(f))].filter(Boolean).sort();
 const labelBox = document.getElementById("labels");
 const labelSummary = labelBox.querySelector("summary");
 const labelPanel = document.getElementById("labelpanel");
-const counts = {};
-D.releases.forEach(r => { if (r.label) counts[r.label] = (counts[r.label] || 0) + 1; });
+const NAME = {}; D.labels.forEach(l => { NAME[l.key] = l.name; });
+const clearBtn = el("button", "clearbtn", "Clear selection"); clearBtn.type = "button";
 function labelText(){
   const n = state.labels.size;
-  labelSummary.textContent = n === 0 ? "All labels" : n === 1 ? [...state.labels][0] : n + " labels";
+  labelSummary.textContent = n === 0 ? "All my labels" : n === 1 ? NAME[[...state.labels][0]] : n + " labels";
 }
-Object.keys(counts).sort().forEach(name => {
-  const row = el("label"), cb = document.createElement("input");
-  cb.type = "checkbox"; cb.value = name;
-  cb.onchange = () => { cb.checked ? state.labels.add(name) : state.labels.delete(name); labelText(); render(); };
-  row.append(cb, el("span", "", name + " (" + counts[name] + ")")); labelPanel.append(row);
-});
-const clearBtn = el("button", "clearbtn", "Clear selection"); clearBtn.type = "button";
+function buildLabelFilter(){
+  const counts = {};
+  D.releases.forEach(r => { if (followed.has(r.lkey)) counts[r.lkey] = (counts[r.lkey] || 0) + 1; });
+  [...state.labels].forEach(k => { if (!counts[k]) state.labels.delete(k); });
+  labelPanel.replaceChildren();
+  Object.keys(counts).sort((a, b) => NAME[a].localeCompare(NAME[b])).forEach(key => {
+    const row = el("label"), cb = document.createElement("input");
+    cb.type = "checkbox"; cb.value = key; cb.checked = state.labels.has(key);
+    cb.onchange = () => { cb.checked ? state.labels.add(key) : state.labels.delete(key); labelText(); render(); };
+    row.append(cb, el("span", "", NAME[key] + " (" + counts[key] + ")")); labelPanel.append(row);
+  });
+  labelPanel.append(clearBtn);
+  labelText();
+}
 clearBtn.onclick = () => { state.labels.clear(); labelPanel.querySelectorAll("input").forEach(c => c.checked = false); labelText(); render(); };
-labelPanel.append(clearBtn);
 document.addEventListener("click", e => { if (!labelBox.contains(e.target)) labelBox.open = false; });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && labelBox.open) { labelBox.open = false; labelSummary.focus(); } });
 fill("shop", "shop", "All shops", [...new Set(D.releases.flatMap(r => r.offers.map(o => o.shop)))].sort());
@@ -290,7 +344,8 @@ SORTS.forEach(([key, name]) => { const o = el("option", "", name); o.value = key
 sortSel.onchange = () => { state.sort = sortSel.value; render(); };
 
 function matches(r){
-  if (state.labels.size && !state.labels.has(r.label)) return false;
+  if (!followed.has(r.lkey)) return false;
+  if (state.labels.size && !state.labels.has(r.lkey)) return false;
   if (state.format !== "all" && r.format !== state.format) return false;
   if (state.q && !r.hay.includes(state.q)) return false;
   const offs = state.shop === "all" ? r.offers : r.offers.filter(o => o.shop === state.shop);
@@ -452,8 +507,43 @@ function render(){
   list.forEach(r => grid.append(card(r)));
   markPlaying();
   document.getElementById("count").textContent = list.length + (list.length === 1 ? " release" : " releases");
-  document.getElementById("empty").hidden = list.length > 0;
+  const emptyEl = document.getElementById("empty");
+  emptyEl.hidden = list.length > 0;
+  emptyEl.textContent = followed.size === 0 ? "You aren't following any labels yet. Choose Manage labels to pick some."
+                                            : "No releases match. Choose All to see everything.";
 }
+// ---- Manage labels (follow / unfollow) ----
+const dlg = $("manage"), mlist = $("mlist");
+function saveFollows(){ try { localStorage.setItem(FKEY, JSON.stringify([...followed])); } catch (e) {} }
+function updateManageButton(){ $("manageBtn").textContent = "Manage labels (" + followed.size + ")"; }
+function followChanged(){ saveFollows(); updateManageButton(); buildLabelFilter(); render(); }
+function renderManage(){
+  const q = norm($("mq").value), only = $("monly").checked;
+  const rows = D.labels.filter(l => (!q || norm(l.name).includes(q)) && (!only || followed.has(l.key)));
+  mlist.replaceChildren();
+  rows.slice(0, 300).forEach(l => {
+    const li = el("li"), info = el("div"), btn = el("button", "followbtn");
+    info.append(el("span", "mname", l.name),
+                el("span", "mmeta", l.n + (l.n === 1 ? " release" : " releases") + (l.full ? ", full catalogue" : "")));
+    btn.type = "button";
+    const paint = () => {
+      const on = followed.has(l.key);
+      btn.textContent = on ? "Following" : "Follow";
+      btn.setAttribute("aria-pressed", on);
+      btn.setAttribute("aria-label", (on ? "Unfollow " : "Follow ") + l.name);
+    };
+    btn.onclick = () => { followed.has(l.key) ? followed.delete(l.key) : followed.add(l.key); paint(); followChanged(); if (only) renderManage(); };
+    paint(); li.append(info, btn); mlist.append(li);
+  });
+  if (!rows.length) mlist.append(el("li", "", "No labels match."));
+  else if (rows.length > 300) mlist.append(el("li", "", "Showing 300 of " + rows.length + ". Search to narrow it down."));
+}
+$("manageBtn").onclick = () => { renderManage(); dlg.showModal ? dlg.showModal() : dlg.setAttribute("open", ""); };
+$("mclose").onclick = () => { dlg.close ? dlg.close() : dlg.removeAttribute("open"); };
+dlg.addEventListener("click", e => { if (e.target === dlg) $("mclose").click(); });
+$("mq").oninput = renderManage; $("monly").onchange = renderManage;
+updateManageButton(); buildLabelFilter();
+
 const nNew = D.releases.filter(isNew).length;
 if (nNew) metaEl.textContent += " " + nNew + (nNew === 1 ? " release is" : " releases are") + " new since your last visit.";
 render();
