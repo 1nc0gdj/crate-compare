@@ -1,0 +1,34 @@
+{
+  "labels": [
+    {
+      "name": "Ikigai",
+      "juno": "https://www.juno.co.uk/labels/Ikigai/",
+      "deejay": "",
+      "yoyaku": "https://yoyaku.io/label/ikigai-records/"
+    },
+    {
+      "name": "Strange Cargo",
+      "juno": "https://www.juno.co.uk/labels/Strange+Cargo/",
+      "deejay": "https://www.deejay.de/Strange_Cargo_Records__L314563",
+      "yoyaku": ""
+    },
+    {
+      "name": "Kopa Records",
+      "juno": "https://www.juno.co.uk/labels/Kopa+France/",
+      "deejay": "",
+      "yoyaku": "https://yoyaku.io/label/kopa-records/"
+    },
+    {
+      "name": "Time Passages",
+      "juno": "https://www.juno.co.uk/labels/Time+Passages+Germany/",
+      "deejay": "https://www.deejay.de/Time_Passages__L29708",
+      "yoyaku": "https://yoyaku.io/label/time-passages/"
+    },
+    {
+      "name": "Faith Beat",
+      "juno": "https://www.juno.co.uk/labels/Faith+Beat+Germany/",
+      "deejay": "https://www.deejay.de/Faith_Beat__L289529",
+      "yoyaku": "https://yoyaku.io/label/faith-beat/"
+    }
+  ]
+}
