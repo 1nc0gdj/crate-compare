@@ -42,6 +42,7 @@ class Listing:
     artwork_url: str | None = None
     release_date: str | None = None   # ISO yyyy-mm-dd
     previews: list | None = None      # [{'title': ..., 'url': ...}] direct audio links
+    label_url: str | None = None      # the label's own page at this shop
 
 
 def norm_cat(cat: str | None) -> str | None:
@@ -185,6 +186,7 @@ class JunoAdapter(Adapter):
             artwork_url=img["src"] if img and img.has_attr("src") else None,
             release_date=release_date,
             previews=previews or None,
+            label_url=urljoin(self.BASE, label["href"]) if label else None,
         )
 
 
@@ -309,6 +311,7 @@ class DeejayAdapter(Adapter):
             status=status, url=url, preview_url=url,
             artwork_url=img["src"] if img and img.has_attr("src") else None,
             release_date=release_date, previews=previews or None,
+            label_url=urljoin(self.BASE, label_el["href"]) if label_el else None,
         )
 
 
@@ -321,6 +324,7 @@ class YoyakuAdapter(Adapter):
     show a release date, so that stays blank.
     """
     slug = "yoyaku"
+    deep_keys = None     # set by run(): the followed labels
     BASE = "https://yoyaku.io"
     PRICE = re.compile(r"(\d{1,3}(?:\.\d{3})*,\d{2})\s*\u20ac")
 
@@ -339,8 +343,14 @@ class YoyakuAdapter(Adapter):
                 if item:
                     out.append(item)
         # The listing can't tell 'sold out' from 'pre-order', so check each release page
-        print(f"  checking {len(out)} release pages for stock status (takes a couple of minutes)...")
-        for item in out:
+        unique = {}
+        for i in out:                      # a record can show up on a label page and in a feed
+            unique.setdefault(i.url, i)
+        out = list(unique.values())
+        deep = [i for i in out if self.deep_keys is None or name_key(i.label) in self.deep_keys]
+        print(f"  checking {len(deep)} of {len(out)} release pages for stock status and tracks "
+              f"(only labels you follow get this slower check)...")
+        for item in deep:
             self.confirm_status(item)
         return out
 
@@ -466,6 +476,7 @@ class YoyakuAdapter(Adapter):
             retailer_slug=self.slug, title=title, artists=artists, label=label,
             catalogue_no=norm_cat(cat), format=fmt, price=price, currency="EUR",
             status=status, url=url, preview_url=url, artwork_url=art, release_date=None,
+            label_url=urljoin(self.BASE, label_el["href"]),
         )
 
 
@@ -499,6 +510,7 @@ SHIPPING = {
 
 # ---------- DB helpers ----------
 def connect():
+    _KEYS.clear()
     con = sqlite3.connect(DB_PATH)
     con.execute("PRAGMA foreign_keys = ON")
     con.row_factory = sqlite3.Row
@@ -554,12 +566,21 @@ def name_key(name: str) -> str:
     return " ".join(words)
 
 
+_KEYS = {}   # remembers name -> id for the current run, so thousands of listings stay fast
+
+
+def simple_key(name: str) -> str:
+    return re.sub(r"[^\w]+", "", name.lower())
+
+
 def get_or_create(con, table, name):
-    key = name_key(name)
-    for row in con.execute(f"SELECT id, name FROM {table}"):
-        if name_key(row["name"]) == key:
-            return row["id"]
-    return con.execute(f"INSERT INTO {table} (name) VALUES (?)", (name,)).lastrowid
+    keyfn = name_key if table == "labels" else simple_key   # labels match loosely; artists must match exactly
+    if table not in _KEYS:
+        _KEYS[table] = {keyfn(r["name"]): r["id"] for r in con.execute(f"SELECT id, name FROM {table}")}
+    key = keyfn(name)
+    if key not in _KEYS[table]:
+        _KEYS[table][key] = con.execute(f"INSERT INTO {table} (name) VALUES (?)", (name,)).lastrowid
+    return _KEYS[table][key]
 
 
 def upsert(con, L: Listing):
@@ -602,6 +623,10 @@ def upsert(con, L: Listing):
         "SELECT id FROM retailers WHERE slug = ?", (L.retailer_slug,)
     ).fetchone()["id"]
 
+    if L.label_url and label_id:
+        con.execute("INSERT OR IGNORE INTO label_pages (label_id, retailer_id, url) VALUES (?,?,?)",
+                    (label_id, retailer_id, L.label_url))
+
     # 2) Upsert this retailer's listing.
     con.execute(
         """INSERT INTO listings (release_id, retailer_id, url, price, currency, status, preview_url, previews)
@@ -639,6 +664,30 @@ def sync_follows(con, follows):
     con.commit()
 
 
+def load_feeds():
+    p = Path("feeds.json")
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def page_url(slug, base, n):
+    """The address of page n of a shop's listing."""
+    if n == 1:
+        return base
+    if slug == "juno":
+        path, _, query = base.partition("?")
+        return path.rstrip("/") + f"/{n}/" + (f"?{query}" if query else "")
+    if slug == "deejay":
+        return re.sub(r"/page_\d+$", f"/page_{n}", base)
+    if slug == "yoyaku":
+        return base.rstrip("/") + f"/page/{n}/"
+    return base
+
+
+def expand_feed(slug):
+    cfg = load_feeds().get(slug) or {}
+    return [page_url(slug, base, n) for base in cfg.get("urls", []) for n in range(1, int(cfg.get("pages", 1)) + 1)]
+
+
 def run(slug):
     follows = load_follows()
     if follows:
@@ -650,10 +699,19 @@ def run(slug):
                 print(f"  {f['name']}: no {slug} page in follows.json yet; skipping")
     else:  # no follow list: fall back to the generic pages above
         urls = {"juno": JUNO_URLS, "deejay": DEEJAY_URLS, "yoyaku": YOYAKU_URLS}[slug]
+    urls += [u for u in expand_feed(slug) if u not in urls]
     if not urls:
         print(f"{slug}: nothing to scrape.")
         return
-    listings = ADAPTERS[slug]().scrape(urls)
+    adapter = ADAPTERS[slug]()
+    if slug == "yoyaku" and follows:
+        adapter.deep_keys = {name_key(f["name"]) for f in follows}
+    scraped = adapter.scrape(urls)
+    listings, seen = [], set()
+    for L in scraped:                       # the same record can appear in several feeds
+        if L.url not in seen:
+            seen.add(L.url)
+            listings.append(L)
     con = connect()
     sync_follows(con, follows)
     for L in listings:

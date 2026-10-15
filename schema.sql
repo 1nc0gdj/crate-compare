@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS listings (
   currency     TEXT NOT NULL,
   status       TEXT NOT NULL DEFAULT 'in_stock'
                CHECK (status IN ('in_stock','preorder','sold_out','unknown')),
+  previews     TEXT,         -- JSON list of {title, url} direct audio links, when a shop offers them
   preview_url  TEXT,         -- retailer's player page or audio URL; link out, don't host
   first_seen   TEXT NOT NULL DEFAULT (datetime('now')),
   last_seen    TEXT NOT NULL DEFAULT (datetime('now')),
@@ -96,3 +97,11 @@ CREATE INDEX IF NOT EXISTS idx_listings_release ON listings(release_id);
 --         JOIN follows f ON f.entity_type='artist' AND f.entity_id = ra.artist_id)
 -- GROUP BY r.id
 -- ORDER BY r.release_date DESC;
+
+-- Where each label's own page lives at each shop (used later to fetch a followed label's full catalogue)
+CREATE TABLE IF NOT EXISTS label_pages (
+  label_id    INTEGER NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+  retailer_id INTEGER NOT NULL REFERENCES retailers(id),
+  url         TEXT NOT NULL,
+  PRIMARY KEY (label_id, retailer_id)
+);

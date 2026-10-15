@@ -1,0 +1,28 @@
+{
+  "juno": {
+    "pages": 3,
+    "urls": [
+      "https://www.juno.co.uk/deep-house/this-week/?media_type=vinyl",
+      "https://www.juno.co.uk/minimal-tech-house/this-week/?media_type=vinyl",
+      "https://www.juno.co.uk/techno-music/this-week/?media_type=vinyl",
+      "https://www.juno.co.uk/ambient-drone/this-week/?media_type=vinyl",
+      "https://www.juno.co.uk/experimental-electronic/this-week/?media_type=vinyl",
+      "https://www.juno.co.uk/electro/this-week/?media_type=vinyl",
+      "https://www.juno.co.uk/psy-goa-trance/this-week/?media_type=vinyl",
+      "https://www.juno.co.uk/downtempo/this-week/?media_type=vinyl",
+      "https://www.juno.co.uk/breakbeat/this-week/?media_type=vinyl"
+    ]
+  },
+  "deejay": {
+    "pages": 3,
+    "urls": [
+      "https://www.deejay.de/m_All/sm_ComeIn/sort_highlights/perpage_160/page_1"
+    ]
+  },
+  "yoyaku": {
+    "pages": 3,
+    "urls": [
+      "https://yoyaku.io/releases/"
+    ]
+  }
+}
