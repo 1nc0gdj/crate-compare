@@ -79,7 +79,10 @@ def build():
     labels = sorted(({"key": k, "name": names[k], "n": counts[k], "full": k in seed} for k in counts),
                     key=lambda l: (-l["n"], l["name"].lower()))
 
+    cfg = scraper.load_config()
     data = {
+        "supabase": ({"url": cfg["supabase_url"].rstrip("/"), "key": cfg["supabase_key"]}
+                     if cfg.get("supabase_url") and cfg.get("supabase_key") else None),
         "labels": labels, "defaults": list(seed),
         "generated": date.today().isoformat(),
         "gbp": round(rates["GBP"], 2), "eur": round(rates["EUR"], 2),
@@ -181,7 +184,7 @@ button.listen{font:inherit;font-size:.82rem;background:none;border:0;padding:0;c
 body.has-player{padding-bottom:5.5rem}
 @media (max-width:700px){.player{grid-template-columns:3.2rem minmax(0,1fr) auto auto}.pseek{grid-column:1/-1}body.has-player{padding-bottom:8rem}}
 button.manage{font:inherit;padding:.3rem .7rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;font-weight:600}
-dialog{border:1px solid var(--ink);background:var(--paper);color:var(--ink);padding:0;width:min(40rem,calc(100vw - 2rem));max-height:85vh;font-family:var(--font)}
+dialog{border:1px solid var(--ink);background:var(--paper);color:var(--ink);padding:0;width:min(62rem,calc(100vw - 2rem));max-height:88vh;font-family:var(--font)}
 dialog[open]{display:flex;flex-direction:column}
 dialog::backdrop{background:rgba(21,38,44,.55)}
 .mhead{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:1rem 1.2rem .4rem}
@@ -189,13 +192,21 @@ dialog::backdrop{background:rgba(21,38,44,.55)}
 .mnote{margin:0;padding:0 1.2rem .7rem;color:var(--dim);font-size:.9rem}
 .mtools{display:flex;flex-wrap:wrap;gap:.6rem 1.2rem;align-items:center;padding:.4rem 1.2rem .9rem;border-bottom:1px solid var(--ink)}
 .mtools label{display:flex;gap:.5rem;align-items:center}
-#mlist{list-style:none;margin:0;padding:0 1.2rem 1rem;overflow:auto}
+#mlist{list-style:none;margin:0;padding:0 1.2rem 1rem;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(19rem,1fr));column-gap:2.2rem;align-content:start}
 #mlist li{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.6rem 0;border-bottom:1px solid var(--rule)}
+#mlist .mletter{grid-column:1/-1;display:block;font-weight:800;font-stretch:115%;font-size:1.15rem;padding:.9rem 0 .25rem;border-bottom:2px solid var(--ink)}
+#mlist .mmore{grid-column:1/-1;justify-content:center;border-bottom:0}
+.mcount{margin:.1rem 0 0;color:var(--dim);font-size:.9rem}
+.mtools label{color:var(--dim)}
+.mtools input[type=search]{flex:1 1 14rem;max-width:22rem}
 .mname{font-weight:700;display:block}
 .mmeta{display:block;color:var(--dim);font-size:.82rem}
 .followbtn{font:inherit;font-weight:700;padding:.3rem .8rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;min-width:6.5rem}
 .followbtn[aria-pressed=true]{background:var(--ink);color:var(--paper)}
 .followbtn:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
+.notice{margin:0;padding:.6rem clamp(1rem,4vw,3rem);background:var(--sticker);color:var(--ink);font-weight:600}
+.mtools input[type=email]{font:inherit;padding:.3rem .6rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);flex:1 1 14rem;max-width:22rem}
+#sform .mnote,#sout .mnote{padding-top:.5rem}
 footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max-width:70ch}
 </style>
 </head>
@@ -209,6 +220,7 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
   <span id="count" aria-live="polite"></span>
   <div class="controls">
     <input type="search" id="q" placeholder="Search artist, title or catalogue number" aria-label="Search artist, title or catalogue number">
+    <button type="button" class="manage" id="authBtn">Sign in</button>
     <button type="button" class="manage" id="manageBtn">Manage labels</button>
     <details class="multi" id="labels"><summary>All my labels</summary><div class="panel" id="labelpanel"></div></details>
     <label>Shop <select id="shop"></select></label>
@@ -217,14 +229,32 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
     <label class="check"><input type="checkbox" id="hide"> Hide sold out</label>
   </div>
 </div>
+<p class="notice" id="notice" role="status" hidden></p>
 <main class="grid" id="grid"></main>
 <p class="empty" id="empty" hidden>No releases match. Choose All to see everything.</p>
 <footer>Totals are the price of one record plus shipping to Sydney, converted to Australian dollars. Shipping per record drops when you buy several from the same shop.</footer>
 <dialog id="manage" aria-labelledby="mtitle">
-  <div class="mhead"><h2 id="mtitle">All labels</h2><button type="button" class="followbtn" id="mclose">Done</button></div>
+  <div class="mhead"><div><h2 id="mtitle">All labels</h2><p class="mcount" id="mcount"></p></div><button type="button" class="followbtn" id="mclose">Done</button></div>
   <p class="mnote">Follow a label to put its releases on your home page. Labels marked "full catalogue" are tracked in full. For the others you see what the shops' new-release pages have caught.</p>
-  <div class="mtools"><input type="search" id="mq" placeholder="Search labels" aria-label="Search labels"><label><input type="checkbox" id="monly"> Only labels I follow</label></div>
+  <div class="mtools">
+    <input type="search" id="mq" placeholder="Search labels" aria-label="Search labels">
+    <label>Sort <select id="msort"><option value="n">Most releases</option><option value="az">A to Z</option><option value="followed">Followed first</option></select></label>
+    <label>Show <select id="mshow"><option value="all">All labels</option><option value="following">Following</option><option value="not">Not following</option><option value="full">Full catalogue</option></select></label>
+    <label>Releases <select id="mmin"><option value="1">Any</option><option value="2">2 or more</option><option value="5">5 or more</option><option value="10">10 or more</option></select></label>
+  </div>
   <ul id="mlist"></ul>
+</dialog>
+<dialog id="signin" aria-labelledby="stitle">
+  <div class="mhead"><h2 id="stitle">Sign in</h2><button type="button" class="followbtn" id="sclose">Close</button></div>
+  <form id="sform">
+    <p class="mnote">Enter your email and we'll send you a sign-in link. There's no password. Your follows are then saved to your account and follow you to other devices.</p>
+    <div class="mtools"><input type="email" id="semail" placeholder="you@example.com" aria-label="Email address" required autocomplete="email"><button type="submit" class="followbtn" id="ssend">Email me a link</button></div>
+    <p class="mnote" id="sstatus" aria-live="polite"></p>
+  </form>
+  <div id="sout" hidden>
+    <p class="mnote">Signed in as <strong id="swho"></strong>. Your follows are saved to your account.</p>
+    <div class="mtools"><button type="button" class="followbtn" id="ssignout">Sign out</button></div>
+  </div>
 </dialog>
 <div class="player" id="player" role="region" aria-label="Preview player" hidden>
   <img id="pimg" alt="" hidden>
@@ -517,11 +547,26 @@ const dlg = $("manage"), mlist = $("mlist");
 function saveFollows(){ try { localStorage.setItem(FKEY, JSON.stringify([...followed])); } catch (e) {} }
 function updateManageButton(){ $("manageBtn").textContent = "Manage labels (" + followed.size + ")"; }
 function followChanged(){ saveFollows(); updateManageButton(); buildLabelFilter(); render(); }
-function renderManage(){
-  const q = norm($("mq").value), only = $("monly").checked;
-  const rows = D.labels.filter(l => (!q || norm(l.name).includes(q)) && (!only || followed.has(l.key)));
+let mShown = 200;
+function renderManage(reset = true){
+  if (reset) mShown = 200;
+  const q = norm($("mq").value), show = $("mshow").value, minN = +$("mmin").value, sortBy = $("msort").value;
+  const rows = D.labels.filter(l =>
+    (!q || norm(l.name).includes(q)) && l.n >= minN &&
+    (show === "all" || (show === "following" && followed.has(l.key)) || (show === "not" && !followed.has(l.key)) || (show === "full" && l.full)));
+  const byName = (a, b) => a.name.localeCompare(b.name, "en", {sensitivity: "base"});
+  if (sortBy === "az") rows.sort(byName);
+  else if (sortBy === "followed") rows.sort((a, b) => (followed.has(b.key) - followed.has(a.key)) || (b.n - a.n) || byName(a, b));
+  else rows.sort((a, b) => (b.n - a.n) || byName(a, b));
+  $("mcount").textContent = "Showing " + rows.length + " of " + D.labels.length + " labels. You follow " + followed.size + ".";
   mlist.replaceChildren();
-  rows.slice(0, 300).forEach(l => {
+  let lastLetter = "";
+  rows.slice(0, mShown).forEach(l => {
+    if (sortBy === "az") {
+      const first = (l.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()[0] || "#").toUpperCase();
+      const letter = /[A-Z]/.test(first) ? first : "#";
+      if (letter !== lastLetter) { lastLetter = letter; mlist.append(el("li", "mletter", letter)); }
+    }
     const li = el("li"), info = el("div"), btn = el("button", "followbtn");
     info.append(el("span", "mname", l.name),
                 el("span", "mmeta", l.n + (l.n === 1 ? " release" : " releases") + (l.full ? ", full catalogue" : "")));
@@ -532,17 +577,131 @@ function renderManage(){
       btn.setAttribute("aria-pressed", on);
       btn.setAttribute("aria-label", (on ? "Unfollow " : "Follow ") + l.name);
     };
-    btn.onclick = () => { followed.has(l.key) ? followed.delete(l.key) : followed.add(l.key); paint(); followChanged(); if (only) renderManage(); };
+    btn.onclick = () => {
+      followed.has(l.key) ? followed.delete(l.key) : followed.add(l.key);
+      paint(); followChanged(); pushFollow(l.key, followed.has(l.key));
+      if (show === "following" || show === "not" || sortBy === "followed") renderManage(false);
+      else $("mcount").textContent = $("mcount").textContent.replace(/You follow \d+\./, "You follow " + followed.size + ".");
+    };
     paint(); li.append(info, btn); mlist.append(li);
   });
   if (!rows.length) mlist.append(el("li", "", "No labels match."));
-  else if (rows.length > 300) mlist.append(el("li", "", "Showing 300 of " + rows.length + ". Search to narrow it down."));
+  else if (rows.length > mShown) {
+    const more = el("li", "mmore"), mb = el("button", "followbtn", "Show more (" + (rows.length - mShown) + " left)");
+    mb.type = "button"; mb.onclick = () => { mShown += 200; renderManage(false); };
+    more.append(mb); mlist.append(more);
+  }
 }
 $("manageBtn").onclick = () => { renderManage(); dlg.showModal ? dlg.showModal() : dlg.setAttribute("open", ""); };
 $("mclose").onclick = () => { dlg.close ? dlg.close() : dlg.removeAttribute("open"); };
 dlg.addEventListener("click", e => { if (e.target === dlg) $("mclose").click(); });
-$("mq").oninput = renderManage; $("monly").onchange = renderManage;
+$("mq").oninput = () => renderManage(); ["msort", "mshow", "mmin"].forEach(id => { $(id).onchange = () => renderManage(); });
 updateManageButton(); buildLabelFilter();
+
+// ---- Accounts: sign in by emailed link; follows saved to your account (Supabase) ----
+const SB = D.supabase;
+const AKEY = "crate-compare-auth";
+let session = null;
+const sdlg = $("signin");
+const notice = text => { const n = $("notice"); n.textContent = text || ""; n.hidden = !text; };
+function jwtClaims(t){
+  try {
+    const p = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(decodeURIComponent(atob(p).split("").map(c => "%" + c.charCodeAt(0).toString(16).padStart(2, "0")).join("")));
+  } catch (e) { return {}; }
+}
+function makeSession(access, refresh){
+  const c = jwtClaims(access);
+  return {access_token: access, refresh_token: refresh, expires_at: c.exp || Date.now() / 1000 + 3000, email: c.email || ""};
+}
+function storeSession(s){
+  session = s;
+  try { s ? localStorage.setItem(AKEY, JSON.stringify(s)) : localStorage.removeItem(AKEY); } catch (e) {}
+}
+async function sb(path, opts = {}, authed = true){
+  const headers = Object.assign({apikey: SB.key, "Content-Type": "application/json"}, opts.headers || {});
+  if (authed) {
+    await refreshIfNeeded();
+    if (!session) throw new Error("not signed in");
+    headers.Authorization = "Bearer " + session.access_token;
+  }
+  const res = await fetch(SB.url + path, Object.assign({}, opts, {headers}));
+  const text = await res.text();
+  let body = null; try { body = text ? JSON.parse(text) : null; } catch (e) {}
+  if (!res.ok) {
+    const msg = body && (body.msg || body.message || body.error_description || body.error) || res.statusText || "request failed";
+    throw new Error(msg + " (" + res.status + ")");
+  }
+  return body;
+}
+async function refreshIfNeeded(){
+  if (!session || session.expires_at - Date.now() / 1000 > 60) return;
+  try {
+    const t = await sb("/auth/v1/token?grant_type=refresh_token", {method: "POST", body: JSON.stringify({refresh_token: session.refresh_token})}, false);
+    storeSession(makeSession(t.access_token, t.refresh_token));
+  } catch (e) { storeSession(null); updateAuthUi(); notice("You've been signed out. Sign in again to sync your follows."); }
+}
+function updateAuthUi(){
+  $("authBtn").textContent = session ? "Account" : "Sign in";
+  $("sform").hidden = !!session; $("sout").hidden = !session;
+  $("stitle").textContent = session ? "Your account" : "Sign in";
+  $("swho").textContent = session ? (session.email || "your account") : "";
+}
+function pushFollow(key, on){
+  if (!SB || !session) return;
+  const call = on
+    ? sb("/rest/v1/follows", {method: "POST", headers: {Prefer: "resolution=ignore-duplicates,return=minimal"},
+                              body: JSON.stringify([{label_key: key, label_name: NAME[key] || key}])})
+    : sb("/rest/v1/follows?label_key=eq." + encodeURIComponent(key), {method: "DELETE"});
+  call.catch(err => { if (session) notice("Couldn't save that to your account: " + err.message); });
+}
+async function syncFollows(){
+  if (!SB || !session) return;
+  try {
+    const rows = await sb("/rest/v1/follows?select=label_key") || [];
+    if (rows.length) followed = new Set(rows.map(r => r.label_key));      // your account is the source of truth
+    else if (followed.size) {                                              // first sign-in: save what you already follow
+      await sb("/rest/v1/follows", {method: "POST", headers: {Prefer: "resolution=ignore-duplicates,return=minimal"},
+               body: JSON.stringify([...followed].map(k => ({label_key: k, label_name: NAME[k] || k})))});
+    }
+    followChanged(); if (dlg.open) renderManage(false);
+  } catch (err) { if (session) notice("Couldn't sync your follows with your account: " + err.message); }
+}
+(function startAccounts(){
+  if (!SB) { $("authBtn").hidden = true; return; }
+  const h = new URLSearchParams(location.hash.replace(/^#/, ""));
+  if (h.get("access_token") && h.get("refresh_token")) {                    // arriving from the emailed link
+    storeSession(makeSession(h.get("access_token"), h.get("refresh_token")));
+    history.replaceState(null, "", location.pathname + location.search);
+    notice("You're signed in.");
+  } else if (h.get("error_description")) {
+    notice("Sign-in didn't work: " + h.get("error_description").replace(/\+/g, " ") + ". Try sending a new link.");
+    history.replaceState(null, "", location.pathname + location.search);
+  } else {
+    try { session = JSON.parse(localStorage.getItem(AKEY) || "null"); } catch (e) {}
+  }
+  updateAuthUi();
+  $("authBtn").onclick = () => { updateAuthUi(); sdlg.showModal ? sdlg.showModal() : sdlg.setAttribute("open", ""); };
+  $("sclose").onclick = () => { sdlg.close ? sdlg.close() : sdlg.removeAttribute("open"); };
+  sdlg.addEventListener("click", e => { if (e.target === sdlg) $("sclose").click(); });
+  $("sform").onsubmit = async e => {
+    e.preventDefault();
+    const email = $("semail").value.trim(), st = $("sstatus");
+    if (!/^https?:$/.test(location.protocol)) { st.textContent = "Sign-in only works on the hosted page, not on a file opened from your computer."; return; }
+    st.textContent = "Sending..."; $("ssend").disabled = true;
+    try {
+      await sb("/auth/v1/otp?redirect_to=" + encodeURIComponent(location.origin + location.pathname),
+               {method: "POST", body: JSON.stringify({email, create_user: true})}, false);
+      st.textContent = "Check your email for a sign-in link. Open it on this device and you'll come back here signed in.";
+    } catch (err) { st.textContent = "Couldn't send the link: " + err.message; }
+    $("ssend").disabled = false;
+  };
+  $("ssignout").onclick = () => {
+    storeSession(null); updateAuthUi(); $("sclose").click();
+    notice("Signed out. Your follows stay on this browser.");
+  };
+  syncFollows();
+})();
 
 const nNew = D.releases.filter(isNew).length;
 if (nNew) metaEl.textContent += " " + nNew + (nNew === 1 ? " release is" : " releases are") + " new since your last visit.";

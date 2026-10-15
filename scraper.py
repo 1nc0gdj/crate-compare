@@ -325,6 +325,7 @@ class YoyakuAdapter(Adapter):
     """
     slug = "yoyaku"
     deep_keys = None     # set by run(): the followed labels
+    max_deep = None      # set by run(): cap on slow checks per run
     BASE = "https://yoyaku.io"
     PRICE = re.compile(r"(\d{1,3}(?:\.\d{3})*,\d{2})\s*\u20ac")
 
@@ -348,6 +349,9 @@ class YoyakuAdapter(Adapter):
             unique.setdefault(i.url, i)
         out = list(unique.values())
         deep = [i for i in out if self.deep_keys is None or name_key(i.label) in self.deep_keys]
+        if self.max_deep and len(deep) > self.max_deep:
+            print(f"  limiting the slow check to {self.max_deep} of {len(deep)} releases this run")
+            deep = deep[:self.max_deep]
         print(f"  checking {len(deep)} of {len(out)} release pages for stock status and tracks "
               f"(only labels you follow get this slower check)...")
         for item in deep:
@@ -664,6 +668,47 @@ def sync_follows(con, follows):
     con.commit()
 
 
+MAX_LABEL_PAGES = 6     # at most this many pages per followed label per shop
+MAX_DEEP_CHECKS = 150   # cap on the slow Yoyaku per-release checks in one run
+
+
+def load_config():
+    p = Path("config.json")
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def fetch_followed_keys():
+    """Labels that anyone follows on the site (names and counts only), from the Supabase database."""
+    cfg = load_config()
+    if not cfg.get("supabase_url") or not cfg.get("supabase_key"):
+        return set()
+    try:
+        r = requests.post(
+            cfg["supabase_url"].rstrip("/") + "/rest/v1/rpc/followed_labels",
+            headers={"apikey": cfg["supabase_key"], "Content-Type": "application/json"},
+            data="{}", timeout=30,
+        )
+        r.raise_for_status()
+        rows = r.json()
+    except Exception as e:
+        print(f"  could not read followed labels from Supabase ({e}); carrying on without them")
+        return set()
+    print(f"  {len(rows)} labels are followed on the site")
+    return {row["lkey"] for row in rows if row.get("lkey")}
+
+
+def followed_label_pages(slug, keys):
+    """This shop's page for each followed label, taken from pages we've already seen listed."""
+    if not keys:
+        return []
+    con = connect()
+    rows = con.execute(
+        """SELECT lb.name, lp.url FROM label_pages lp
+           JOIN labels lb ON lb.id = lp.label_id
+           JOIN retailers rt ON rt.id = lp.retailer_id WHERE rt.slug = ?""", (slug,)).fetchall()
+    return [r["url"] for r in rows if name_key(r["name"]) in keys]
+
+
 def load_feeds():
     p = Path("feeds.json")
     return json.loads(p.read_text()) if p.exists() else {}
@@ -703,10 +748,21 @@ def run(slug):
     if not urls:
         print(f"{slug}: nothing to scrape.")
         return
+    cloud_keys = fetch_followed_keys()
+    label_pages = [u for u in followed_label_pages(slug, cloud_keys) if u not in urls]
     adapter = ADAPTERS[slug]()
     if slug == "yoyaku" and follows:
-        adapter.deep_keys = {name_key(f["name"]) for f in follows}
+        adapter.deep_keys = {name_key(f["name"]) for f in follows} | cloud_keys
+        adapter.max_deep = MAX_DEEP_CHECKS
     scraped = adapter.scrape(urls)
+    have = {L.url for L in scraped}
+    for base in label_pages:                # full catalogue of labels people follow, page by page
+        for n in range(1, MAX_LABEL_PAGES + 1):
+            fresh = [L for L in adapter.scrape([page_url(slug, base, n)]) if L.url not in have]
+            if not fresh:
+                break
+            have.update(L.url for L in fresh)
+            scraped += fresh
     listings, seen = [], set()
     for L in scraped:                       # the same record can appear in several feeds
         if L.url not in seen:
