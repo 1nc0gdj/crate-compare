@@ -41,6 +41,7 @@ class Listing:
     preview_url: str | None = None
     artwork_url: str | None = None
     release_date: str | None = None   # ISO yyyy-mm-dd
+    previews: list | None = None      # [{'title': ..., 'url': ...}] direct audio links
 
 
 def norm_cat(cat: str | None) -> str | None:
@@ -159,6 +160,13 @@ class JunoAdapter(Adapter):
         label = next((a for a in node.select('a[href*="/labels/"]')
                       if "?" not in a["href"] and a.get_text(strip=True)), None)
         preview = node.select_one('a[href*="/MP3/"]')
+        previews = []
+        for n, a in enumerate(node.select('a[href*="/MP3/"]'), 1):
+            t = a.find_next(string=lambda x: x.strip())   # the track title follows its play link
+            name = t.strip() if t else ""
+            if not name or len(name) > 80:
+                name = f"Track {n}"
+            previews.append({"title": name, "url": urljoin(self.BASE, a["href"])})
         img = node.select_one("img")
 
         return Listing(
@@ -176,10 +184,16 @@ class JunoAdapter(Adapter):
             preview_url=urljoin(self.BASE, preview["href"]) if preview else None,
             artwork_url=img["src"] if img and img.has_attr("src") else None,
             release_date=release_date,
+            previews=previews or None,
         )
 
 
 # ---------- Deejay.de adapter ----------
+def deejay_audio_url(article, letter):
+    """From Deejay's own player: /streamit/<2nd-last digit>/<last digit>/<release number><track letter>.mp3"""
+    return f"https://www.deejay.de/streamit/{article[-2]}/{article[-1]}/{article}{letter}.mp3"
+
+
 class DeejayAdapter(Adapter):
     """
     Deejay.de: prices in EUR with comma decimals ('12,40 EUR'), release date as
@@ -277,6 +291,16 @@ class DeejayAdapter(Adapter):
             status = "unknown"
             print(f"  ? could not read the stock status for '{title}'. End of its text: {text[-160:]}")
 
+        previews = []
+        for a in node.select('a[id^="playTrack_"]'):
+            m = re.match(r"playTrack_(\d+)_([a-z0-9]+)$", a.get("id", ""))
+            if not m:
+                continue
+            pos, name = a.find("b"), a.select_one(".trackname")
+            label_txt = ((pos.get_text(strip=True) + ": ") if pos else "") + (name.get_text(strip=True) if name else "")
+            previews.append({"title": label_txt.strip(": ") or f"Track {len(previews) + 1}",
+                             "url": deejay_audio_url(m.group(1), m.group(2))})
+
         img = node.select_one("img")
         url = urljoin(self.BASE, href)
         return Listing(
@@ -284,7 +308,7 @@ class DeejayAdapter(Adapter):
             catalogue_no=norm_cat(cat), format=fmt, price=price, currency="EUR",
             status=status, url=url, preview_url=url,
             artwork_url=img["src"] if img and img.has_attr("src") else None,
-            release_date=release_date,
+            release_date=release_date, previews=previews or None,
         )
 
 
@@ -332,12 +356,36 @@ class YoyakuAdapter(Adapter):
             return "in_stock"
         return None
 
+    def fetch_tracks(self, product_id):
+        """Yoyaku's own player asks this address for a release's tracks and their mp3 links."""
+        time.sleep(DELAY_SECONDS)
+        r = requests.get(f"{self.BASE}/wp-json/fwap/v1/track/{product_id}", headers=HEADERS, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        rows = data.get("data") or data.get("tracks") or []
+        out = []
+        for t in rows:
+            url = (t.get("mp3") or t.get("url") or "").strip()
+            if not url or t.get("playable") is False:
+                continue
+            name = re.sub(r"^[\s\u2013\u2014-]+", "", t.get("title") or "").strip()
+            pos = (t.get("position") or "").strip()
+            out.append({"title": f"{pos}: {name}" if pos and name else (name or pos or f"Track {len(out) + 1}"),
+                        "url": url})
+        return out
+
     def confirm_status(self, item):
         try:
             soup = self.fetch(item.url)
         except requests.RequestException as e:
             print(f"    could not open {item.url} ({e}); keeping the listing's status")
             return
+        play = soup.select_one("a.fwap-play[data-product]")
+        if play:
+            try:
+                item.previews = self.fetch_tracks(play["data-product"]) or None
+            except (requests.RequestException, ValueError) as e:
+                print(f"    could not load preview tracks for {item.title} ({e})")
         meta = soup.find("meta", attrs={"property": "product:availability"})
         status = self.status_from_meta(meta.get("content") if meta else None)
         if status and status != item.status:
@@ -460,6 +508,8 @@ def connect():
 def init_db():
     con = connect()
     con.executescript(Path("schema.sql").read_text())
+    if "previews" not in [r["name"] for r in con.execute("PRAGMA table_info(listings)")]:
+        con.execute("ALTER TABLE listings ADD COLUMN previews TEXT")   # older databases
     con.execute(
         """INSERT OR IGNORE INTO retailers
            (slug, name, base_url, currency, ship_first_item, ship_extra_item, free_ship_over)
@@ -554,12 +604,14 @@ def upsert(con, L: Listing):
 
     # 2) Upsert this retailer's listing.
     con.execute(
-        """INSERT INTO listings (release_id, retailer_id, url, price, currency, status, preview_url)
-           VALUES (?,?,?,?,?,?,?)
+        """INSERT INTO listings (release_id, retailer_id, url, price, currency, status, preview_url, previews)
+           VALUES (?,?,?,?,?,?,?,?)
            ON CONFLICT(release_id, retailer_id) DO UPDATE SET
              url=excluded.url, price=excluded.price, currency=excluded.currency,
-             status=excluded.status, preview_url=excluded.preview_url, last_seen=datetime('now')""",
-        (release_id, retailer_id, L.url, L.price, L.currency, L.status, L.preview_url),
+             status=excluded.status, preview_url=excluded.preview_url,
+             previews=COALESCE(excluded.previews, previews), last_seen=datetime('now')""",
+        (release_id, retailer_id, L.url, L.price, L.currency, L.status, L.preview_url,
+         json.dumps(L.previews) if L.previews else None),
     )
     listing_id = con.execute(
         "SELECT id FROM listings WHERE release_id=? AND retailer_id=?",
@@ -693,10 +745,43 @@ def compare():
     print("\nDelivered totals are for buying ONE record. Shipping is cheaper per record when you buy several.")
 
 
+def audio_check():
+    """Check that preview audio can be loaded the way our web page would load it (from another site)."""
+    as_our_site = {**HEADERS, "Referer": "https://example.github.io/crate-compare/", "Range": "bytes=0-1023"}
+
+    def try_audio(name, u):
+        try:
+            r = requests.get(u, headers=as_our_site, timeout=30)
+            print(f"  {name}: HTTP {r.status_code}, {r.headers.get('Content-Type')}, "
+                  f"{r.headers.get('Content-Range') or r.headers.get('Content-Length')} bytes  <- {u}")
+        except requests.RequestException as e:
+            print(f"  {name}: error {e}  <- {u}")
+        time.sleep(DELAY_SECONDS)
+
+    print("1. Can an audio file be loaded by a page on another website?")
+    try_audio("Juno", "https://www.juno.co.uk/MP3/SF1183207-01-01-01.mp3")
+    try_audio("Deejay.de", deejay_audio_url("1092733", "a"))
+
+    print("\n2. Yoyaku's track list for the Ikigai release (product 752882):")
+    u = "https://yoyaku.io/wp-json/fwap/v1/track/752882"
+    try:
+        r = requests.get(u, headers=HEADERS, timeout=30)
+        print(f"  HTTP {r.status_code} <- {u}")
+        print("  ", r.text[:1500])
+        m = re.search(r"https?:[^\"'\s<>]+?\.(?:mp3|m4a|ogg|wav)[^\"'\s<>]*", r.text.replace("\\/", "/"))
+        if m:
+            print("\n3. Loading the first Yoyaku audio file from another website:")
+            try_audio("Yoyaku", m.group(0))
+    except requests.RequestException as e:
+        print("  error:", e)
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "init":
         init_db()
+    elif cmd == "audio-check":
+        audio_check()
     elif cmd == "compare":
         compare()
     elif cmd == "all":

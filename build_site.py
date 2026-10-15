@@ -23,7 +23,7 @@ def build():
                   (SELECT group_concat(a.name, ', ') FROM release_artists ra
                      JOIN artists a ON a.id = ra.artist_id WHERE ra.release_id = r.id) AS artists,
                   rt.name AS shop, rt.currency AS ship_cur, rt.ship_first_item AS ship,
-                  li.price, li.currency, li.status, li.url, li.preview_url, li.first_seen
+                  li.price, li.currency, li.status, li.url, li.preview_url, li.first_seen, li.previews
            FROM releases r
            LEFT JOIN labels lb ON lb.id = r.label_id
            JOIN listings li ON li.release_id = r.id
@@ -48,6 +48,7 @@ def build():
         rel["offers"].append({
             "shop": r["shop"], "status": r["status"], "price": price, "ship": ship,
             "total": total, "url": r["url"], "preview": r["preview_url"] or "",
+            "tracks": json.loads(r["previews"]) if r["previews"] else [],
         })
 
     out = []
@@ -133,6 +134,31 @@ details.multi[open] summary::after{transform:rotate(225deg);margin-top:.2rem}
 .offer.gone .cost strong{color:var(--dim);font-weight:600}
 .listen{font-size:.82rem;color:var(--dim)}
 .empty{padding:3rem clamp(1rem,4vw,3rem);color:var(--dim)}
+.playbtn{position:absolute;left:.6rem;bottom:.6rem;width:3rem;height:3rem;border-radius:50%;border:0;background:var(--ink);color:var(--paper);display:grid;place-items:center;cursor:pointer}
+.playbtn svg,.player button svg{width:1.4rem;height:1.4rem;fill:currentColor}
+.sleeve.playing .art{outline:3px solid var(--sticker);outline-offset:3px}
+.tracks{margin:0 0 .7rem;font-size:.9rem}
+.tracks summary{cursor:pointer;color:var(--dim);font-weight:600}
+.tracks ol{list-style:none;margin:.3rem 0 0;padding:0}
+.tracks button{font:inherit;background:none;border:0;text-align:left;padding:.2rem 0;cursor:pointer;color:var(--ink)}
+.tracks button.on{font-weight:800}
+.tracks .src{margin:.2rem 0 0;color:var(--dim);font-size:.8rem}
+button.listen{font:inherit;font-size:.82rem;background:none;border:0;padding:0;color:var(--teal);font-weight:600;cursor:pointer;text-align:left}
+.player{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--ink);color:var(--paper);display:grid;
+  grid-template-columns:3.2rem minmax(0,1fr) auto minmax(9rem,22rem) auto;gap:.4rem 1rem;align-items:center;
+  padding:.6rem clamp(1rem,4vw,3rem) calc(.6rem + env(safe-area-inset-bottom,0px))}
+.player[hidden]{display:none}
+.player img{width:3.2rem;height:3.2rem;object-fit:cover;background:var(--paper)}
+.player img[hidden]{display:block;visibility:hidden}
+.ptrack{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.psub{font-size:.82rem;opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pctl{display:flex;gap:.3rem}
+.player button{font:inherit;background:none;border:0;color:var(--paper);cursor:pointer;padding:.4rem;display:grid;place-items:center}
+.player button:focus-visible,.player input:focus-visible{outline:3px solid var(--sticker);outline-offset:2px}
+.pseek{display:flex;align-items:center;gap:.5rem;font-size:.8rem;font-variant-numeric:tabular-nums}
+.pseek input{flex:1;min-width:0;accent-color:var(--sticker)}
+body.has-player{padding-bottom:5.5rem}
+@media (max-width:700px){.player{grid-template-columns:3.2rem minmax(0,1fr) auto auto}.pseek{grid-column:1/-1}body.has-player{padding-bottom:8rem}}
 footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max-width:70ch}
 </style>
 </head>
@@ -156,6 +182,13 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 <main class="grid" id="grid"></main>
 <p class="empty" id="empty" hidden>No releases match. Choose All to see everything.</p>
 <footer>Totals are the price of one record plus shipping to Sydney, converted to Australian dollars. Shipping per record drops when you buy several from the same shop.</footer>
+<div class="player" id="player" role="region" aria-label="Preview player" hidden>
+  <img id="pimg" alt="" hidden>
+  <div><div class="ptrack" id="ptrack"></div><div class="psub" id="psub"></div></div>
+  <div class="pctl"><button type="button" id="pprev" aria-label="Previous track"></button><button type="button" id="pplay" aria-label="Play or pause"></button><button type="button" id="pnext" aria-label="Next track"></button></div>
+  <div class="pseek"><span id="pcur">0:00</span><input type="range" id="pseek" min="0" max="1000" value="0" aria-label="Seek"><span id="pdur">0:00</span></div>
+  <button type="button" id="pclose" aria-label="Close player">Close</button>
+</div>
 <script type="application/json" id="data">__DATA__</script>
 <script>
 const D = JSON.parse(document.getElementById("data").textContent);
@@ -163,7 +196,8 @@ const STATUS = {in_stock:["In stock","ok"], preorder:["Pre-order","pre"], sold_o
 const VIEWS = [["all","All"],["in_stock","In stock"],["preorder","Pre-order"],["sold_out","Sold out"]];
 const state = {view:"all", labels:new Set(), shop:"all", format:"all", q:"", hide:false, sort:"new"};
 const norm = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[\s\-_.]+/g, "");
-D.releases.forEach(r => {
+D.releases.forEach((r, i) => {
+  r.id = i;
   r.hay = norm(r.title + " " + r.artists + " " + r.cat);
   r.addedMs = r.added ? Date.parse(r.added.replace(" ", "T") + "Z") : 0;
 });
@@ -269,6 +303,8 @@ function matches(r){
 
 function card(r){
   const a = el("article", "sleeve");
+  a.dataset.rel = r.id;
+  const src = source(r);
   const art = el("div", "art");
   const none = () => el("div", "noart", r.cat || r.title);
   if (safe(r.art)) {
@@ -278,6 +314,11 @@ function card(r){
     art.append(img);
   } else art.append(none());
   if (isNew(r)) art.append(el("div", "newtag", "New"));
+  if (src) {
+    const pb = el("button", "playbtn"); pb.type = "button"; pb.innerHTML = ICON.play; pb.setAttribute("aria-label", "Play preview");
+    pb.onclick = () => { if (P.rel === r) { audio.paused ? audio.play().catch(() => {}) : audio.pause(); } else startTracks(r, src, 0); };
+    art.append(pb);
+  }
   if (r.best) {
     const s = el("div", "sticker"); s.append(el("span", "", "cheapest at"), el("b", "", r.best)); art.append(s);
   }
@@ -292,20 +333,124 @@ function card(r){
     const left = el("div"), st = STATUS[o.status] || STATUS.unknown;
     const shop = safe(o.url) ? Object.assign(el("a", "shop", o.shop), {href:o.url, target:"_blank", rel:"noopener"}) : el("span", "shop", o.shop);
     left.append(shop, el("span", "status " + st[1], st[0]));
-    if (safe(o.preview)) left.append(Object.assign(el("a", "listen", "Listen"), {href:o.preview, target:"_blank", rel:"noopener"}));
+    if (o.tracks && o.tracks.length) {
+      const pb = el("button", "listen", "Play preview"); pb.type = "button"; pb.onclick = () => startTracks(r, o, 0);
+      left.append(pb);
+    } else if (safe(o.preview)) left.append(Object.assign(el("a", "listen", "Listen"), {href:o.preview, target:"_blank", rel:"noopener"}));
     const right = el("div", "cost");
     if (o.total != null) right.append(el("strong", "", money(o.total)), el("small", "", money(o.price) + " + " + money(o.ship) + " shipping"));
     else right.append(el("small", "", "Price unknown"));
     li.append(left, right); ul.append(li);
   });
+  if (src) a.append(trackList(r, src));
   a.append(ul);
   return a;
+}
+
+// ---- Preview player ----
+const ICON = {
+  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>',
+  prev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h2v12H6zM9.5 12 18 6v12z"/></svg>',
+  next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 6h2v12h-2zM6 6l8.5 6L6 18z"/></svg>'
+};
+const $ = id => document.getElementById(id);
+const audio = new Audio(); audio.preload = "none";
+const P = {queue: [], i: -1, rel: null, offer: null, errors: 0};
+let currentList = [];
+const bar = $("player"), pplay = $("pplay"), pseek = $("pseek");
+$("pprev").innerHTML = ICON.prev; $("pnext").innerHTML = ICON.next; pplay.innerHTML = ICON.play;
+const clock = s => isFinite(s) ? Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0") : "0:00";
+const source = r => r.offers.find(o => o.tracks && o.tracks.length) || null;
+
+function markPlaying(){
+  document.querySelectorAll(".sleeve").forEach(c => {
+    const mine = !!P.rel && +c.dataset.rel === P.rel.id;
+    c.classList.toggle("playing", mine);
+    const b = c.querySelector(".playbtn");
+    if (b) { b.innerHTML = mine && !audio.paused ? ICON.pause : ICON.play; b.setAttribute("aria-label", mine && !audio.paused ? "Pause preview" : "Play preview"); }
+  });
+  document.querySelectorAll(".tracks button").forEach(b =>
+    b.classList.toggle("on", !!P.rel && +b.dataset.rel === P.rel.id && b.dataset.shop === P.offer.shop && +b.dataset.i === P.i));
+}
+function startTracks(r, offer, index){
+  P.queue = offer.tracks; P.i = index; P.rel = r; P.offer = offer; P.errors = 0;
+  loadTrack();
+}
+function loadTrack(){
+  const t = P.queue[P.i];
+  audio.src = t.url;
+  audio.play().catch(() => {});
+  bar.hidden = false; document.body.classList.add("has-player");
+  $("ptrack").textContent = t.title;
+  $("psub").textContent = [P.rel.artists, P.rel.title].filter(Boolean).join(", ") + ". Preview from " + P.offer.shop;
+  const img = $("pimg"); img.hidden = !safe(P.rel.art); if (safe(P.rel.art)) img.src = P.rel.art;
+  markPlaying();
+  try {
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({title: t.title, artist: P.rel.artists, album: P.rel.title, artwork: safe(P.rel.art) ? [{src: P.rel.art}] : []});
+      navigator.mediaSession.setActionHandler("previoustrack", prevTrack);
+      navigator.mediaSession.setActionHandler("nexttrack", nextTrack);
+    }
+  } catch (e) {}
+}
+function nextTrack(){
+  if (P.i + 1 < P.queue.length) { P.i++; loadTrack(); return; }
+  const at = currentList.indexOf(P.rel);      // end of this release: carry on to the next one in your list
+  if (at >= 0) for (let k = at + 1; k < currentList.length; k++) {
+    const o = source(currentList[k]);
+    if (o) { startTracks(currentList[k], o, 0); return; }
+  }
+  audio.pause();
+}
+function prevTrack(){
+  if (audio.currentTime > 3 || P.i === 0) { audio.currentTime = 0; return; }
+  P.i--; loadTrack();
+}
+audio.addEventListener("play", () => { pplay.innerHTML = ICON.pause; markPlaying(); });
+audio.addEventListener("pause", () => { pplay.innerHTML = ICON.play; markPlaying(); });
+audio.addEventListener("playing", () => { P.errors = 0; });
+audio.addEventListener("ended", nextTrack);
+audio.addEventListener("loadedmetadata", () => { $("pdur").textContent = clock(audio.duration); });
+audio.addEventListener("timeupdate", () => {
+  $("pcur").textContent = clock(audio.currentTime);
+  pseek.value = audio.duration ? Math.round(audio.currentTime / audio.duration * 1000) : 0;
+});
+audio.addEventListener("error", () => {
+  if (!P.rel) return;
+  P.errors++;
+  if (P.errors <= 2 && P.i + 1 < P.queue.length) { nextTrack(); return; }
+  $("ptrack").textContent = "This preview couldn't be loaded";
+  $("psub").textContent = "Try it on " + P.offer.shop + " instead.";
+});
+pplay.onclick = () => { if (!audio.src) return; audio.paused ? audio.play().catch(() => {}) : audio.pause(); };
+$("pprev").onclick = prevTrack; $("pnext").onclick = nextTrack;
+pseek.oninput = () => { if (audio.duration) audio.currentTime = pseek.value / 1000 * audio.duration; };
+$("pclose").onclick = () => {
+  audio.pause(); audio.removeAttribute("src"); P.rel = null; bar.hidden = true;
+  document.body.classList.remove("has-player"); markPlaying();
+};
+document.addEventListener("keydown", e => {
+  if (e.code === "Space" && !bar.hidden && !/^(INPUT|SELECT|TEXTAREA|BUTTON|SUMMARY)$/.test(e.target.tagName)) { e.preventDefault(); pplay.click(); }
+});
+function trackList(r, o){
+  const d = el("details", "tracks"), ol = el("ol");
+  o.tracks.forEach((t, i) => {
+    const li = el("li"), b = el("button", "", t.title);
+    b.type = "button"; b.dataset.rel = r.id; b.dataset.shop = o.shop; b.dataset.i = i;
+    b.onclick = () => startTracks(r, o, i);
+    li.append(b); ol.append(li);
+  });
+  d.append(el("summary", "", "Tracks (" + o.tracks.length + ")"), ol, el("p", "src", "Previews from " + o.shop));
+  return d;
 }
 
 function render(){
   const grid = document.getElementById("grid"); grid.replaceChildren();
   const list = D.releases.filter(matches).sort(SORTS.find(x => x[0] === state.sort)[2]);
+  currentList = list;
   list.forEach(r => grid.append(card(r)));
+  markPlaying();
   document.getElementById("count").textContent = list.length + (list.length === 1 ? " release" : " releases");
   document.getElementById("empty").hidden = list.length > 0;
 }
