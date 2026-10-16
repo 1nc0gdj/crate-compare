@@ -11,10 +11,10 @@
   "Downtempo / Balearic",
   "Experimental / IDM",
   "Breaks / Bass",
+  "Jungle / D&B",
   "Trance",
   "Psy / Goa",
-  "Disco",
-  "Other"
+  "Disco"
  ],
  "map": {
   "juno:Ambient / Drone": [
@@ -33,7 +33,7 @@
    "Breaks / Bass"
   ],
   "juno:Drum & Bass / Jungle": [
-   "Breaks / Bass"
+   "Jungle / D&B"
   ],
   "juno:Dubstep": [
    "Breaks / Bass"
@@ -98,69 +98,27 @@
   "juno:Psy / Goa Trance": [
    "Psy / Goa"
   ],
-  "juno:Broken Beat / Nu Jazz": [
-   "Other"
-  ],
-  "juno:Funk": [
-   "Other"
-  ],
-  "juno:Hip Hop / R&B": [
-   "Other"
-  ],
-  "juno:Indie / Alternative": [
-   "Other"
-  ],
-  "juno:International": [
-   "Other"
-  ],
-  "juno:Jazz": [
-   "Other"
-  ],
-  "juno:Library / Archive": [
-   "Other"
-  ],
-  "juno:Pop": [
-   "Other"
-  ],
-  "juno:Reggae": [
-   "Other"
-  ],
-  "juno:Soul": [
-   "Other"
-  ],
-  "juno:Soundtracks": [
-   "Other"
-  ],
-  "juno:Gabba": [
-   "Other"
-  ],
-  "juno:Hardstyle": [
-   "Other"
-  ],
-  "juno:UK Hardcore": [
-   "Other"
-  ],
-  "juno:Dub": [
-   "Other"
-  ],
-  "juno:Dancehall / Ragga": [
-   "Other"
-  ],
-  "juno:Roots / Lovers Rock": [
-   "Other"
-  ],
-  "juno:Reggae Classics / Ska": [
-   "Other"
-  ],
-  "juno:Rock": [
-   "Other"
-  ],
-  "juno:Metal": [
-   "Other"
-  ],
-  "juno:Classical": [
-   "Other"
-  ],
+  "juno:Broken Beat / Nu Jazz": [],
+  "juno:Funk": [],
+  "juno:Hip Hop / R&B": [],
+  "juno:Indie / Alternative": [],
+  "juno:International": [],
+  "juno:Jazz": [],
+  "juno:Library / Archive": [],
+  "juno:Pop": [],
+  "juno:Reggae": [],
+  "juno:Soul": [],
+  "juno:Soundtracks": [],
+  "juno:Gabba": [],
+  "juno:Hardstyle": [],
+  "juno:UK Hardcore": [],
+  "juno:Dub": [],
+  "juno:Dancehall / Ragga": [],
+  "juno:Roots / Lovers Rock": [],
+  "juno:Reggae Classics / Ska": [],
+  "juno:Rock": [],
+  "juno:Metal": [],
+  "juno:Classical": [],
   "yoyaku:House": [
    "House"
   ],
@@ -205,7 +163,7 @@
    "Breaks / Bass"
   ],
   "yoyaku:Drum & Bass": [
-   "Breaks / Bass"
+   "Jungle / D&B"
   ],
   "yoyaku:Bass": [
    "Breaks / Bass"
@@ -259,27 +217,13 @@
   "yoyaku:Trance": [
    "Trance"
   ],
-  "yoyaku:Jazz": [
-   "Other"
-  ],
-  "yoyaku:Dub": [
-   "Other"
-  ],
-  "yoyaku:Funk": [
-   "Other"
-  ],
-  "yoyaku:Hip Hop": [
-   "Other"
-  ],
-  "yoyaku:Pop": [
-   "Other"
-  ],
-  "yoyaku:Synth Pop": [
-   "Other"
-  ],
-  "yoyaku:New Wave": [
-   "Other"
-  ],
+  "yoyaku:Jazz": [],
+  "yoyaku:Dub": [],
+  "yoyaku:Funk": [],
+  "yoyaku:Hip Hop": [],
+  "yoyaku:Pop": [],
+  "yoyaku:Synth Pop": [],
+  "yoyaku:New Wave": [],
   "deejay:House": [
    "House"
   ],
@@ -323,11 +267,292 @@
   "deejay:Trance": [
    "Trance"
   ],
-  "deejay:Pop & Rock": [
-   "Other"
+  "deejay:Pop & Rock": [],
+  "deejay:Hip-Hop": [],
+  "deejay:House / Deep": [
+   "Deep House"
   ],
-  "deejay:Hip-Hop": [
-   "Other"
-  ]
+  "deejay:House / Disco": [
+   "Disco"
+  ],
+  "deejay:House / Nu Disco": [
+   "Disco"
+  ],
+  "deejay:House / Italo": [
+   "Disco"
+  ],
+  "deejay:Pop / Disco": [
+   "Disco"
+  ],
+  "deejay:Pop / Italo": [
+   "Disco"
+  ],
+  "deejay:House / Breaks": [
+   "Breaks / Bass"
+  ],
+  "deejay:Beats / Drum&Bass": [
+   "Jungle / D&B"
+  ],
+  "deejay:Beats / Break-Beat": [
+   "Breaks / Bass"
+  ],
+  "deejay:Beats / Uk Garage": [
+   "Breaks / Bass"
+  ],
+  "deejay:Beats / Bass": [
+   "Breaks / Bass"
+  ],
+  "deejay:Beats / Jungle": [
+   "Jungle / D&B"
+  ],
+  "deejay:Beats / Dubstep": [
+   "Breaks / Bass"
+  ],
+  "deejay:House / Garage": [
+   "Breaks / Bass"
+  ],
+  "deejay:House / Dance": [
+   "House"
+  ],
+  "deejay:House / Club": [
+   "House"
+  ],
+  "deejay:House / Vocal": [
+   "House"
+  ],
+  "deejay:House / Edits": [
+   "House"
+  ],
+  "deejay:House / Funky": [
+   "House"
+  ],
+  "deejay:House / Chicago": [
+   "House"
+  ],
+  "deejay:House / French": [
+   "House"
+  ],
+  "deejay:House / Bigroom": [
+   "House"
+  ],
+  "deejay:House / Jazzy": [
+   "House"
+  ],
+  "deejay:House / Slow": [
+   "House"
+  ],
+  "deejay:House / Vinyl Only": [
+   "House"
+  ],
+  "deejay:House / Limited": [
+   "House"
+  ],
+  "deejay:House / 1St@Vinyl": [
+   "House"
+  ],
+  "deejay:House / Tribal": [
+   "House"
+  ],
+  "deejay:House / Dub": [
+   "House"
+  ],
+  "deejay:House / Classics": [
+   "House"
+  ],
+  "deejay:Techno / Dub": [
+   "Deep & Dub Techno"
+  ],
+  "deejay:Techno / Classics": [
+   "Techno"
+  ],
+  "deejay:Techno / Hardcore": [
+   "Techno"
+  ],
+  "deejay:Techno / Vinyl Only": [
+   "Techno"
+  ],
+  "deejay:Techno / Tribal": [
+   "Techno"
+  ],
+  "deejay:Techno / Dark": [
+   "Techno"
+  ],
+  "deejay:Techno / Hard": [
+   "Techno"
+  ],
+  "deejay:Techno / Rave": [
+   "Techno"
+  ],
+  "deejay:Techno / Schranz": [
+   "Techno"
+  ],
+  "deejay:Techno / Industrial": [
+   "Techno"
+  ],
+  "deejay:House / Neotrance": [
+   "Trance"
+  ],
+  "deejay:Trance / Trance": [
+   "Trance"
+  ],
+  "deejay:Trance / Classics": [
+   "Trance"
+  ],
+  "deejay:Trance / Progressive": [
+   "Trance"
+  ],
+  "deejay:Trance / Commercial": [
+   "Trance"
+  ],
+  "deejay:Trance / Vocal": [
+   "Trance"
+  ],
+  "deejay:Beats / Ambient": [
+   "Ambient / Drone"
+  ],
+  "deejay:House / Ambient": [
+   "Ambient / Drone"
+  ],
+  "deejay:Techno / Drone": [
+   "Ambient / Drone"
+  ],
+  "deejay:House / Electronica": [
+   "Experimental / IDM"
+  ],
+  "deejay:Beats / Experimental": [
+   "Experimental / IDM"
+  ],
+  "deejay:Techno / Idm": [
+   "Experimental / IDM"
+  ],
+  "deejay:Techno / Experimental": [
+   "Experimental / IDM"
+  ],
+  "deejay:Pop / Electronica": [
+   "Experimental / IDM"
+  ],
+  "deejay:Beats / Lounge": [
+   "Downtempo / Balearic"
+  ],
+  "deejay:Beats / Trip-Hop": [
+   "Downtempo / Balearic"
+  ],
+  "deejay:Beats / Headz": [
+   "Downtempo / Balearic"
+  ],
+  "deejay:House / Balearic": [
+   "Downtempo / Balearic"
+  ],
+  "deejay:Hip-Hop / Downbeat": [
+   "Downtempo / Balearic"
+  ],
+  "deejay:House / Detroit": [
+   "Electro / Detroit"
+  ],
+  "deejay:Beats / Electro": [
+   "Electro / Detroit"
+  ],
+  "deejay:Pop / Electro": [
+   "Electro / Detroit"
+  ],
+  "deejay:Classics": [],
+  "deejay:Pop": [],
+  "deejay:Beats": [],
+  "deejay:Pop / Indie": [],
+  "deejay:Pop / Synth-Pop": [],
+  "deejay:House / Wave": [],
+  "deejay:Pop / Soundtrack": [],
+  "deejay:Pop / New Wave": [],
+  "deejay:Pop / Wave": [],
+  "deejay:Hip-Hop / Reggae-Dub": [],
+  "deejay:Hip-Hop / Funk": [],
+  "deejay:Hip-Hop / Soul": [],
+  "deejay:Beats / Synth": [],
+  "deejay:Hip-Hop / Afrobeat": [],
+  "deejay:Hip-Hop / Hip-Hop": [],
+  "deejay:Pop / Classics": [],
+  "deejay:Pop / Dancefloor": [],
+  "deejay:Pop / Jazz": [],
+  "deejay:Pop / Punk": [],
+  "deejay:Beats / Classics": [],
+  "deejay:Hip-Hop / R & B": [],
+  "deejay:Hip-Hop / Reggae": [],
+  "deejay:Pop / Alternative": [],
+  "deejay:Pop / Klassic": [],
+  "deejay:Pop / Latin": [],
+  "deejay:Pop / Rock": [],
+  "deejay:Pop / Vocal": [],
+  "deejay:Pop / World Music": [],
+  "yoyaku:Beats": [
+   "Breaks / Bass"
+  ],
+  "yoyaku:Dubstep": [
+   "Breaks / Bass"
+  ],
+  "yoyaku:Jungle": [
+   "Jungle / D&B"
+  ],
+  "yoyaku:Broken Beat": [
+   "Breaks / Bass"
+  ],
+  "yoyaku:Footwork": [
+   "Breaks / Bass"
+  ],
+  "yoyaku:Grime": [
+   "Breaks / Bass"
+  ],
+  "yoyaku:Halftime": [
+   "Breaks / Bass"
+  ],
+  "yoyaku:Ambient House": [
+   "Ambient / Drone",
+   "House"
+  ],
+  "yoyaku:Illbient": [
+   "Ambient / Drone"
+  ],
+  "yoyaku:Chicago House": [
+   "House"
+  ],
+  "yoyaku:Ghetto House": [
+   "House"
+  ],
+  "yoyaku:Electro House": [
+   "House"
+  ],
+  "yoyaku:Hard Techno": [
+   "Techno"
+  ],
+  "yoyaku:Berghain": [
+   "Techno"
+  ],
+  "yoyaku:Boogie": [
+   "Disco"
+  ],
+  "yoyaku:Trip Hop": [
+   "Downtempo / Balearic"
+  ],
+  "yoyaku:EBM": [
+   "Experimental / IDM"
+  ],
+  "yoyaku:Electroclash": [
+   "Experimental / IDM"
+  ],
+  "yoyaku:Reggae": [],
+  "yoyaku:Classics": [],
+  "yoyaku:Post-Punk": [],
+  "yoyaku:Rock": [],
+  "yoyaku:Barker": [],
+  "yoyaku:Big Band": [],
+  "yoyaku:Folk": [],
+  "yoyaku:Fusion": [],
+  "yoyaku:Indie": [],
+  "yoyaku:Latin": [],
+  "yoyaku:Leisure System": [],
+  "yoyaku:R&B": [],
+  "yoyaku:Soul": [],
+  "yoyaku:Vocal": [],
+  "yoyaku:World": [],
+  "yoyaku:Electronic": []
  }
 }

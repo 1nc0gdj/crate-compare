@@ -30,8 +30,8 @@ def build():
                   r.release_date, r.artwork_url,
                   (SELECT group_concat(a.name, ', ') FROM release_artists ra
                      JOIN artists a ON a.id = ra.artist_id WHERE ra.release_id = r.id) AS artists,
-                  rt.name AS shop, rt.currency AS ship_cur, rt.ship_first_item AS ship,
-                  li.price, li.currency, li.status, li.url, li.preview_url, li.first_seen, li.previews
+                  rt.name AS shop, rt.slug AS slug, rt.currency AS ship_cur, rt.ship_first_item AS ship,
+                  li.price, li.currency, li.status, li.url, li.preview_url, li.first_seen, li.previews, li.genres
            FROM releases r
            LEFT JOIN labels lb ON lb.id = r.label_id
            JOIN listings li ON li.release_id = r.id
@@ -40,14 +40,19 @@ def build():
            ORDER BY r.id"""
     ).fetchall()
 
+    gcfg, gmap = scraper.load_genre_map()
     releases = {}
     for r in rows:
         rel = releases.setdefault(r["id"], {
             "title": r["title"], "artists": r["artists"] or "", "label": r["label"], "lkey": scraper.name_key(r["label"]),
             "cat": r["catalogue_no"] or "", "format": r["format"] or "",
-            "date": r["release_date"] or "", "art": r["artwork_url"] or "", "added": "", "offers": [],
+            "date": r["release_date"] or "", "art": r["artwork_url"] or "", "added": "", "offers": [], "genres": [],
         })
         rel["added"] = min(rel["added"] or r["first_seen"], r["first_seen"])
+        if r["genres"]:
+            for g in scraper.simplified_genres(r["slug"], json.loads(r["genres"]), gmap):
+                if g not in rel["genres"]:
+                    rel["genres"].append(g)
         price = ship = total = None
         if r["price"] is not None and r["ship"] is not None:
             price = round(r["price"] * rates[r["currency"]], 2)
@@ -83,7 +88,7 @@ def build():
     data = {
         "supabase": ({"url": cfg["supabase_url"].rstrip("/"), "key": cfg["supabase_key"]}
                      if cfg.get("supabase_url") and cfg.get("supabase_key") else None),
-        "labels": labels, "defaults": list(seed),
+        "labels": labels, "defaults": list(seed), "genreOrder": gcfg.get("genres", []),
         "generated": date.today().isoformat(),
         "gbp": round(rates["GBP"], 2), "eur": round(rates["EUR"], 2),
         "releases": out,
@@ -223,6 +228,7 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
     <button type="button" class="manage" id="authBtn">Sign in</button>
     <button type="button" class="manage" id="manageBtn">Manage labels</button>
     <details class="multi" id="labels"><summary>All my labels</summary><div class="panel" id="labelpanel"></div></details>
+    <details class="multi" id="genres"><summary>All genres</summary><div class="panel" id="genrepanel"></div></details>
     <label>Shop <select id="shop"></select></label>
     <label>Format <select id="format"></select></label>
     <label>Sort <select id="sort"></select></label>
@@ -268,7 +274,7 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 const D = JSON.parse(document.getElementById("data").textContent);
 const STATUS = {in_stock:["In stock","ok"], preorder:["Pre-order","pre"], sold_out:["Sold out","out"], unknown:["Stock unknown","unk"]};
 const VIEWS = [["all","All"],["in_stock","In stock"],["preorder","Pre-order"],["sold_out","Sold out"]];
-const state = {view:"all", labels:new Set(), shop:"all", format:"all", q:"", hide:false, sort:"new"};
+const state = {view:"all", labels:new Set(), shop:"all", format:"all", q:"", hide:false, sort:"new", genres:new Set()};
 const norm = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[\s\-_.]+/g, "");
 D.releases.forEach((r, i) => {
   r.id = i;
@@ -339,8 +345,41 @@ function buildLabelFilter(){
   labelText();
 }
 clearBtn.onclick = () => { state.labels.clear(); labelPanel.querySelectorAll("input").forEach(c => c.checked = false); labelText(); render(); };
-document.addEventListener("click", e => { if (!labelBox.contains(e.target)) labelBox.open = false; });
-document.addEventListener("keydown", e => { if (e.key === "Escape" && labelBox.open) { labelBox.open = false; labelSummary.focus(); } });
+const genreBox = document.getElementById("genres");
+const genreSummary = genreBox.querySelector("summary");
+const genrePanel = document.getElementById("genrepanel");
+const NOGENRE = "Unsorted";
+const gclear = el("button", "clearbtn", "Clear selection"); gclear.type = "button";
+const relGenres = r => r.genres.length ? r.genres : [NOGENRE];
+function genreText(){
+  const n = state.genres.size;
+  genreSummary.textContent = n === 0 ? "All genres" : n === 1 ? [...state.genres][0] : n + " genres";
+}
+function buildGenreFilter(){
+  const counts = {};
+  D.releases.forEach(r => { if (followed.has(r.lkey)) relGenres(r).forEach(g => { counts[g] = (counts[g] || 0) + 1; }); });
+  [...state.genres].forEach(g => { if (!counts[g]) state.genres.delete(g); });
+  const order = D.genreOrder || [];
+  const rank = g => g === NOGENRE ? 1e6 : (order.indexOf(g) < 0 ? 1e5 : order.indexOf(g));
+  genrePanel.replaceChildren();
+  Object.keys(counts).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)).forEach(g => {
+    const row = el("label"), cb = document.createElement("input");
+    cb.type = "checkbox"; cb.value = g; cb.checked = state.genres.has(g);
+    cb.onchange = () => { cb.checked ? state.genres.add(g) : state.genres.delete(g); genreText(); render(); };
+    row.append(cb, el("span", "", g + " (" + counts[g] + ")")); genrePanel.append(row);
+  });
+  genrePanel.append(gclear);
+  genreText();
+}
+gclear.onclick = () => { state.genres.clear(); genrePanel.querySelectorAll("input").forEach(c => c.checked = false); genreText(); render(); };
+document.addEventListener("click", e => {
+  if (!labelBox.contains(e.target)) labelBox.open = false;
+  if (!genreBox.contains(e.target)) genreBox.open = false;
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && labelBox.open) { labelBox.open = false; labelSummary.focus(); }
+  if (e.key === "Escape" && genreBox.open) { genreBox.open = false; genreSummary.focus(); }
+});
 fill("shop", "shop", "All shops", [...new Set(D.releases.flatMap(r => r.offers.map(o => o.shop)))].sort());
 fill("format", "format", "All formats", uniq(r => r.format));
 document.getElementById("q").oninput = e => { state.q = norm(e.target.value); render(); };
@@ -377,6 +416,7 @@ function matches(r){
   if (!followed.has(r.lkey)) return false;
   if (state.labels.size && !state.labels.has(r.lkey)) return false;
   if (state.format !== "all" && r.format !== state.format) return false;
+  if (state.genres.size && !relGenres(r).some(g => state.genres.has(g))) return false;
   if (state.q && !r.hay.includes(state.q)) return false;
   const offs = state.shop === "all" ? r.offers : r.offers.filter(o => o.shop === state.shop);
   if (!offs.length) return false;
@@ -546,7 +586,7 @@ function render(){
 const dlg = $("manage"), mlist = $("mlist");
 function saveFollows(){ try { localStorage.setItem(FKEY, JSON.stringify([...followed])); } catch (e) {} }
 function updateManageButton(){ $("manageBtn").textContent = "Manage labels (" + followed.size + ")"; }
-function followChanged(){ saveFollows(); updateManageButton(); buildLabelFilter(); render(); }
+function followChanged(){ saveFollows(); updateManageButton(); buildLabelFilter(); buildGenreFilter(); render(); }
 let mShown = 200;
 function renderManage(reset = true){
   if (reset) mShown = 200;
@@ -596,7 +636,7 @@ $("manageBtn").onclick = () => { renderManage(); dlg.showModal ? dlg.showModal()
 $("mclose").onclick = () => { dlg.close ? dlg.close() : dlg.removeAttribute("open"); };
 dlg.addEventListener("click", e => { if (e.target === dlg) $("mclose").click(); });
 $("mq").oninput = () => renderManage(); ["msort", "mshow", "mmin"].forEach(id => { $(id).onchange = () => renderManage(); });
-updateManageButton(); buildLabelFilter();
+updateManageButton(); buildLabelFilter(); buildGenreFilter();
 
 // ---- Accounts: sign in by emailed link; follows saved to your account (Supabase) ----
 const SB = D.supabase;
