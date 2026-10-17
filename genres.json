@@ -6,7 +6,7 @@
   "Tech House",
   "Deep House",
   "House",
-  "Electro House",
+  "Progressive House",
   "Electro / Detroit",
   "Acid",
   "Ambient / Drone",
@@ -69,13 +69,13 @@
    "House"
   ],
   "juno:Electro House": [
-   "Electro House"
+   "House"
   ],
   "juno:Funky / Club House": [
    "House"
   ],
   "juno:Progressive House": [
-   "House"
+   "Progressive House"
   ],
   "juno:Minimal / Tech House": [
    "Minimal House",
@@ -127,10 +127,10 @@
    "House"
   ],
   "yoyaku:Progressive": [
-   "House"
+   "Progressive House"
   ],
   "yoyaku:Progressive House": [
-   "House"
+   "Progressive House"
   ],
   "yoyaku:Techno": [
    "Techno"
@@ -232,7 +232,7 @@
    "House"
   ],
   "deejay:House / Progressive": [
-   "House"
+   "Progressive House"
   ],
   "deejay:Techno": [
    "Techno"
@@ -522,7 +522,7 @@
    "House"
   ],
   "yoyaku:Electro House": [
-   "Electro House"
+   "House"
   ],
   "yoyaku:Hard Techno": [
    "Techno"

@@ -36,7 +36,7 @@ create table if not exists public.saved_items (
   list text not null check (list in ('basket', 'wishlist')),
   title text,
   created_at timestamptz not null default now(),
-  primary key (user_id, item_key)
+  primary key (user_id, item_key, list)
 );
 
 alter table public.saved_items enable row level security;
@@ -49,3 +49,7 @@ create policy "read own saved" on public.saved_items for select using (auth.uid(
 create policy "add own saved" on public.saved_items for insert with check (auth.uid() = user_id);
 create policy "change own saved" on public.saved_items for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "remove own saved" on public.saved_items for delete using (auth.uid() = user_id);
+
+-- If saved_items was created earlier with one list per record, allow a record in both lists
+alter table public.saved_items drop constraint if exists saved_items_pkey;
+alter table public.saved_items add primary key (user_id, item_key, list);

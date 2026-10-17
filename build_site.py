@@ -94,8 +94,17 @@ def build():
                 e = art.setdefault(k, {"key": k, "name": n, "n": 0})
                 e["n"] += 1
     artists = sorted(art.values(), key=lambda a: (-a["n"], a["name"].lower()))
-    for rel in out:
-        del rel["anames"]
+    for rel in out:       # [name, key] pairs, so the page can link each artist's name to their page
+        rel["anames"] = [[n, ("a:" + scraper.simple_key(n)) if ("a:" + scraper.simple_key(n)) in rel["akeys"] else ""] for n in rel["anames"]]
+
+    # each label's and artist's own page at each shop
+    for l in labels: l["pages"] = {}
+    for a in artists: a["pages"] = {}
+    lby, aby = {l["key"]: l for l in labels}, {a["key"]: a for a in artists}
+    for r in con.execute("SELECT lb.name AS name, rt.name AS shop, lp.url FROM label_pages lp JOIN labels lb ON lb.id = lp.label_id JOIN retailers rt ON rt.id = lp.retailer_id"):
+        if scraper.name_key(r["name"]) in lby: lby[scraper.name_key(r["name"])]["pages"][r["shop"]] = r["url"]
+    for r in con.execute("SELECT a.name AS name, rt.name AS shop, ap.url FROM artist_pages ap JOIN artists a ON a.id = ap.artist_id JOIN retailers rt ON rt.id = ap.retailer_id"):
+        if "a:" + scraper.simple_key(r["name"]) in aby: aby["a:" + scraper.simple_key(r["name"])]["pages"][r["shop"]] = r["url"]
 
     shops = {r["name"]: {"first": round(r["ship_first_item"] * rates[r["currency"]], 2),
                          "extra": round(r["ship_extra_item"] * rates[r["currency"]], 2)}
@@ -134,7 +143,19 @@ TEMPLATE = r"""<!doctype html>
 body{margin:0;background:var(--fog);color:var(--ink);font-family:var(--font);line-height:1.4}
 a{color:inherit}
 a:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
-header{padding:2.2rem clamp(1rem,4vw,3rem) 1rem}
+header{padding:1.2rem clamp(1rem,4vw,3rem) 1rem}
+.headrow{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}
+#authBtn{flex:none;white-space:nowrap}
+.eacts{display:flex;gap:.6rem;flex-wrap:wrap;justify-content:flex-end}
+#entityview{padding:0 clamp(1rem,4vw,3rem) 3rem}
+#entityview .mhead,#entityview .mnote{padding-left:0;padding-right:0}
+.entlink{color:inherit;text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:.15em}
+.entlink:hover{text-decoration-color:var(--ink)}
+.pextra{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:.3rem 1.4rem;align-items:center;font-size:.8rem}
+.pextra label{display:flex;align-items:center;gap:.5rem}
+.pextra input[type=range]{width:7.5rem;accent-color:var(--sticker)}
+.pextra output{min-width:3.2rem;font-variant-numeric:tabular-nums}
+.pextra button{border:1px solid rgba(255,255,255,.5);padding:.15rem .6rem;font-size:.8rem}
 h1{margin:0;font-size:clamp(2rem,5.5vw,3.8rem);font-weight:800;font-stretch:125%;line-height:1;letter-spacing:-.02em;max-width:16ch}
 .meta{margin:.9rem 0 0;color:var(--dim);max-width:62ch}
 .bar{position:sticky;top:0;z-index:5;background:var(--fog);border-bottom:1px solid var(--rule);
@@ -204,8 +225,8 @@ button.listen{font:inherit;font-size:.82rem;background:none;border:0;padding:0;c
 .player button:focus-visible,.player input:focus-visible{outline:3px solid var(--sticker);outline-offset:2px}
 .pseek{display:flex;align-items:center;gap:.5rem;font-size:.8rem;font-variant-numeric:tabular-nums}
 .pseek input{flex:1;min-width:0;accent-color:var(--sticker)}
-body.has-player{padding-bottom:5.5rem}
-@media (max-width:700px){.player{grid-template-columns:3.2rem minmax(0,1fr) auto auto}.pseek{grid-column:1/-1}body.has-player{padding-bottom:8rem}}
+body.has-player{padding-bottom:8rem}
+@media (max-width:700px){.player{grid-template-columns:3.2rem minmax(0,1fr) auto auto}.pseek{grid-column:1/-1}body.has-player{padding-bottom:12rem}}
 button.manage{font:inherit;padding:.3rem .7rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;font-weight:600}
 .savedacts{display:grid;gap:.4rem;margin:.6rem 0 0}
 .basketbtn.alt{background:var(--paper);color:var(--teal);border-color:var(--teal)}
@@ -265,7 +286,7 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 </head>
 <body>
 <header>
-  <h1>New from the labels you follow</h1>
+  <div class="headrow"><h1>New from the labels you follow</h1><button type="button" class="manage" id="authBtn">Sign in</button></div>
   <p class="meta" id="meta"></p>
 </header>
 <nav class="site" aria-label="Pages"><a href="#/" id="navHome">New releases</a><a href="#/labels" id="navLabels">Labels</a><a href="#/artists" id="navArtists">Artists</a><a href="#/wishlist" id="navWishlist">Wishlist</a><a href="#/basket" id="navBasket">Basket</a></nav>
@@ -277,7 +298,6 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
   <span id="count" aria-live="polite"></span>
   <div class="controls">
     <input type="search" id="q" placeholder="Search artist, title or catalogue number" aria-label="Search artist, title or catalogue number">
-    <button type="button" class="manage" id="authBtn">Sign in</button>
     <details class="multi" id="labels"><summary>All my labels</summary><div class="panel" id="labelpanel"></div></details>
     <details class="multi" id="genres"><summary>All genres</summary><div class="panel" id="genrepanel"></div></details>
     <label>Shop <select id="shop"></select></label>
@@ -289,6 +309,11 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 <p class="empty" id="empty" hidden>No releases match. Choose All to see everything.</p>
 <footer>Totals are the price of one record plus shipping to Sydney, converted to Australian dollars. Shipping per record drops when you buy several from the same shop.</footer>
 </div>
+<section id="entityview" hidden aria-labelledby="etitle">
+  <div class="mhead"><div><h2 id="etitle"></h2><p class="mcount" id="esub"></p></div><div class="eacts"><button type="button" class="followbtn" id="efollow"></button><a class="followbtn backlink" href="#/">Back to releases</a></div></div>
+  <p class="mnote" id="elinks"></p>
+  <main class="grid" id="egrid"></main>
+</section>
 <section id="wishview" hidden aria-labelledby="wtitle">
   <div class="mhead"><div><h2 id="wtitle">Wishlist</h2><p class="mcount" id="wsub"></p></div><a class="followbtn backlink" href="#/">Back to releases</a></div>
   <p class="mnote" id="wnote">Records you might buy. They stay here, out of your basket, until you move them across or remove them.</p>
@@ -328,6 +353,12 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
   <div class="pctl"><button type="button" id="pprev" aria-label="Previous track"></button><button type="button" id="pplay" aria-label="Play or pause"></button><button type="button" id="pnext" aria-label="Next track"></button></div>
   <div class="pseek"><span id="pcur">0:00</span><input type="range" id="pseek" min="0" max="1000" value="0" aria-label="Seek"><span id="pdur">0:00</span></div>
   <button type="button" id="pclose" aria-label="Close player">Close</button>
+  <div class="pextra">
+    <label>Volume <input type="range" id="pvol" min="0" max="100" value="100" aria-label="Volume"></label>
+    <label>Tempo <input type="range" id="ptempo" min="-16" max="16" step="0.5" value="0" aria-label="Tempo adjust, percent"> <output id="ptempoval">0%</output></label>
+    <button type="button" id="ptempo0">Reset tempo</button>
+    <label class="pkey"><input type="checkbox" id="pkey" checked> Key lock</label>
+  </div>
 </div>
 <script type="application/json" id="data">__DATA__</script>
 <script>
@@ -342,12 +373,11 @@ try { basket = new Set(JSON.parse(localStorage.getItem(BKEY) || "[]")); } catch 
 let wish = new Set();
 try { wish = new Set(JSON.parse(localStorage.getItem(WKEY) || "[]")); } catch (e) {}
 function saveSaved(){ try { localStorage.setItem(BKEY, JSON.stringify([...basket])); localStorage.setItem(WKEY, JSON.stringify([...wish])); } catch (e) {} }
-// a record is in the basket, on the wishlist, or neither: never both
-function setSaved(r, list){
-  basket.delete(r.key); wish.delete(r.key);
-  if (list === "basket") basket.add(r.key);
-  if (list === "wishlist") wish.add(r.key);
-  saveSaved(); updateManageButton(); pushSaved(r.key, r.title, list);
+// a record can be in the basket, on the wishlist, both or neither
+function setSaved(r, list, on){
+  const set = list === "basket" ? basket : wish;
+  on ? set.add(r.key) : set.delete(r.key);
+  saveSaved(); updateManageButton(); pushSaved(r.key, r.title, list, on);
 }
 const norm = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[\s\-_.]+/g, "");
 D.releases.forEach((r, i) => {
@@ -529,11 +559,25 @@ function savedButtons(r){
     wb.textContent = inW ? "Saved for later (remove)" : "Save for later"; wb.setAttribute("aria-pressed", inW);
     bb.hidden = !buyable && !inB;
   };
-  bb.onclick = () => { setSaved(r, basket.has(r.key) ? null : "basket"); paint(); if (location.hash === "#/wishlist") renderWishlist(); };
-  wb.onclick = () => { setSaved(r, wish.has(r.key) ? null : "wishlist"); paint(); if (location.hash === "#/wishlist") renderWishlist(); };
+  bb.onclick = () => { setSaved(r, "basket", !basket.has(r.key)); paint(); if (location.hash === "#/wishlist") renderWishlist(); };
+  wb.onclick = () => { setSaved(r, "wishlist", !wish.has(r.key)); paint(); if (location.hash === "#/wishlist") renderWishlist(); };
   paint(); box.append(bb, wb);
   return box;
 }
+function artCandidates(u){            // try the biggest version of the cover first, then fall back to the one we scraped
+  if (!safe(u)) return [];
+  const out = [];
+  if (/imagescdn\.juno\.co\.uk\//.test(u)) out.push(u.replace(/imagescdn\.juno\.co\.uk\/\d+\//, "imagescdn.juno.co.uk/full/").replace(/-MED(\.\w+)$/, "-BIG$1"));
+  if (/yoyaku\.io\/wp-content\//.test(u)) out.push(u.replace(/-\d+x\d+(\.\w+)$/, "$1"));
+  out.push(u);
+  return [...new Set(out)];
+}
+function loadArt(img, urls, fail){
+  let i = 0;
+  img.onerror = () => { i++; if (i < urls.length) img.src = urls[i]; else fail(); };
+  img.src = urls[0];
+}
+function entityLink(text, kind, key){ return Object.assign(el("a", "entlink", text), {href: "#/" + kind + "/" + encodeURIComponent(key)}); }
 function card(r){
   const a = el("article", "sleeve");
   a.dataset.rel = r.id;
@@ -542,8 +586,8 @@ function card(r){
   const none = () => el("div", "noart", r.cat || r.title);
   if (safe(r.art)) {
     const img = document.createElement("img");
-    img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer"; img.src = r.art;
-    img.onerror = () => { img.replaceWith(none()); };
+    img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
+    loadArt(img, artCandidates(r.art), () => img.replaceWith(none()));
     art.append(img);
   } else art.append(none());
   if (isNew(r)) art.append(el("div", "newtag", "New"));
@@ -556,10 +600,18 @@ function card(r){
     const s = el("div", "sticker"); s.append(el("span", "", "cheapest at"), el("b", "", r.best)); art.append(s);
   }
   a.append(art, el("h2", "title", r.title));
-  if (r.artists) a.append(el("p", "by", r.artists));
-  const bits = [r.label, r.cat, r.format];
+  if (r.anames.length) {
+    const by = el("p", "by");
+    r.anames.forEach(([name, key], i) => { if (i) by.append(", "); by.append(key ? entityLink(name, "artist", key) : document.createTextNode(name)); });
+    a.append(by);
+  }
+  const info = el("p", "info");
+  if (r.label) info.append(entityLink(r.label, "label", r.lkey));
+  const bits = [r.cat, r.format];
   if (r.date) bits.push((r.date > D.generated ? "due " : "released ") + nice(r.date));
-  a.append(el("p", "info", bits.filter(Boolean).join(", ")));
+  const rest = bits.filter(Boolean).join(", ");
+  if (rest) info.append((r.label ? ", " : "") + rest);
+  a.append(info);
   const ul = el("ul", "offers");
   r.offers.forEach(o => {
     const li = el("li", "offer" + (avail(o) ? "" : " gone"));
@@ -613,12 +665,12 @@ function startTracks(r, offer, index){
 }
 function loadTrack(){
   const t = P.queue[P.i];
-  audio.src = t.url;
+  audio.src = t.url; applyTempo();
   audio.play().catch(() => {});
   bar.hidden = false; document.body.classList.add("has-player");
   $("ptrack").textContent = t.title;
   $("psub").textContent = [P.rel.artists, P.rel.title].filter(Boolean).join(", ") + ". Preview from " + P.offer.shop;
-  const img = $("pimg"); img.hidden = !safe(P.rel.art); if (safe(P.rel.art)) img.src = P.rel.art;
+  const img = $("pimg"); img.hidden = !safe(P.rel.art); if (safe(P.rel.art)) loadArt(img, artCandidates(P.rel.art), () => { img.hidden = true; });
   markPlaying();
   try {
     if ("mediaSession" in navigator) {
@@ -641,6 +693,26 @@ function prevTrack(){
   if (audio.currentTime > 3 || P.i === 0) { audio.currentTime = 0; return; }
   P.i--; loadTrack();
 }
+const PKEY = "crate-compare-player";
+const tune = {vol: 100, tempo: 0, keylock: true};
+try { Object.assign(tune, JSON.parse(localStorage.getItem(PKEY) || "{}")); } catch (e) {}
+function applyTempo(){
+  const rate = 1 + tune.tempo / 100;
+  audio.defaultPlaybackRate = rate; audio.playbackRate = rate;       // set both: a new track resets the rate to the default
+  audio.preservesPitch = audio.mozPreservesPitch = audio.webkitPreservesPitch = tune.keylock;
+}
+function paintTune(){
+  $("pvol").value = tune.vol; $("ptempo").value = tune.tempo; $("pkey").checked = tune.keylock;
+  $("ptempoval").textContent = (tune.tempo > 0 ? "+" : "") + tune.tempo.toFixed(1).replace(/\.0$/, "") + "%";
+  audio.volume = tune.vol / 100; applyTempo();
+  try { localStorage.setItem(PKEY, JSON.stringify(tune)); } catch (e) {}
+}
+$("pvol").oninput = e => { tune.vol = +e.target.value; paintTune(); };
+$("ptempo").oninput = e => { tune.tempo = +e.target.value; paintTune(); };
+$("ptempo0").onclick = () => { tune.tempo = 0; paintTune(); };
+$("pkey").onchange = e => { tune.keylock = e.target.checked; paintTune(); };
+paintTune();
+audio.addEventListener("loadedmetadata", applyTempo);
 audio.addEventListener("play", () => { pplay.innerHTML = ICON.pause; markPlaying(); });
 audio.addEventListener("pause", () => { pplay.innerHTML = ICON.play; markPlaying(); });
 audio.addEventListener("playing", () => { P.errors = 0; });
@@ -725,7 +797,7 @@ function renderManage(reset = true){
     }
     const li = el("li"), info = el("div"), btn = el("button", "followbtn");
     const tg = topGenres(GM[l.key]);
-    info.append(el("span", "mname", l.name),
+    info.append(Object.assign(el("a", "mname entlink", l.name), {href: "#/" + (kind === "artists" ? "artist" : "label") + "/" + encodeURIComponent(l.key)}),
                 el("span", "mmeta", l.n + (l.n === 1 ? " release" : " releases") + (l.full ? ", full catalogue" : "") + (tg.length ? " · " + tg.join(", ") : "")));
     if (followed.has(l.key)) {
       const see = el("button", "seebtn", "See releases"); see.type = "button";
@@ -770,13 +842,15 @@ function fillGenreSelect(){
   [["", "Any genre"], ...order.map(g => [g, g])].forEach(([v, t]) => { const o = el("option", "", t); o.value = v; sel.append(o); });
 }
 function route(){
-  const h = location.hash, kind = h === "#/labels" ? "labels" : h === "#/artists" ? "artists" : h === "#/basket" ? "basket" : h === "#/wishlist" ? "wishlist" : "home";
-  $("homeview").hidden = kind !== "home"; $("manageview").hidden = kind !== "labels" && kind !== "artists"; $("basketview").hidden = kind !== "basket"; $("wishview").hidden = kind !== "wishlist";
+  const ent = location.hash.match(/^#\/(label|artist)\/(.+)$/);
+  const h = location.hash, kind = ent ? "entity" : h === "#/labels" ? "labels" : h === "#/artists" ? "artists" : h === "#/basket" ? "basket" : h === "#/wishlist" ? "wishlist" : "home";
+  $("homeview").hidden = kind !== "home"; $("manageview").hidden = kind !== "labels" && kind !== "artists"; $("basketview").hidden = kind !== "basket"; $("wishview").hidden = kind !== "wishlist"; $("entityview").hidden = kind !== "entity";
   [["navHome", "home"], ["navLabels", "labels"], ["navArtists", "artists"], ["navBasket", "basket"], ["navWishlist", "wishlist"]].forEach(([id, k]) => {
     if (k === kind) $(id).setAttribute("aria-current", "page"); else $(id).removeAttribute("aria-current");
   });
   if (kind === "basket") { renderBasket(); window.scrollTo(0, 0); }
   if (kind === "wishlist") { renderWishlist(); window.scrollTo(0, 0); }
+  if (kind === "entity") { renderEntity(ent[1], decodeURIComponent(ent[2])); window.scrollTo(0, 0); }
   if (kind === "labels" || kind === "artists") {
     if (mKind !== kind) { mKind = kind; $("mq").value = ""; $("mshow").value = "all"; $("mgenre").value = ""; }
     $("mtitle").textContent = kind === "labels" ? "Labels" : "Artists";
@@ -827,6 +901,26 @@ function planBasket(items){
     .sort((a, b) => a.total - b.total)[0] || null;
   return {best, opts, separate, single, missing: items.filter((_, i) => !idx.includes(i))};
 }
+function renderEntity(type, key){
+  const isLabel = type === "label", list = isLabel ? D.labels : D.artists, e = list.find(x => x.key === key);
+  const grid = $("egrid"); grid.replaceChildren(); $("elinks").replaceChildren();
+  if (!e) { $("etitle").textContent = "Not found"; $("esub").textContent = ""; $("efollow").hidden = true; return; }
+  const rels = D.releases.filter(r => isLabel ? r.lkey === key : r.akeys.includes(key)).sort((a, b) => b.date.localeCompare(a.date));
+  const tg = topGenres((isLabel ? LG : AG)[key]);
+  $("etitle").textContent = e.name;
+  $("esub").textContent = (isLabel ? "Label" : "Artist") + " · " + rels.length + (rels.length === 1 ? " release" : " releases") + (tg.length ? " · " + tg.join(", ") : "");
+  const fb = $("efollow"); fb.hidden = false;
+  const paint = () => { const on = followed.has(key); fb.textContent = on ? "Following" : "Follow"; fb.setAttribute("aria-pressed", on); fb.setAttribute("aria-label", (on ? "Unfollow " : "Follow ") + e.name); };
+  fb.onclick = () => { followed.has(key) ? followed.delete(key) : followed.add(key); paint(); followChanged(); pushFollow(key, followed.has(key)); };
+  paint();
+  const shops = Object.entries(e.pages || {}).filter(([, u]) => safe(u));
+  if (shops.length) {
+    $("elinks").append("Their page at: ");
+    shops.forEach(([shop, u], i) => { if (i) $("elinks").append(", "); $("elinks").append(Object.assign(el("a", "entlink", shop), {href: u, target: "_blank", rel: "noopener"})); });
+  }
+  rels.slice(0, 300).forEach(r => grid.append(card(r)));
+  if (!rels.length) grid.append(el("p", "mnote", "No releases found yet."));
+}
 function renderWishlist(){
   const grid = $("wgrid"); grid.replaceChildren();
   const items = D.releases.filter(r => wish.has(r.key)).sort((a, b) => b.date.localeCompare(a.date));
@@ -864,9 +958,9 @@ function renderBasket(){
       const r = items[i], o = plan.opts[i][s], li = el("li"), left = el("div"), right = el("div");
       left.append(el("span", "bt", r.title), el("span", "bm", [r.artists, r.label, r.cat].filter(Boolean).join(", ") + (o.status === "preorder" ? " · pre-order" : "")));
       const rm = el("button", "rmbtn", "Remove"); rm.type = "button";
-      rm.onclick = () => { setSaved(r, null); renderBasket(); render(); };
-      const later = el("button", "rmbtn", "Save for later"); later.type = "button";
-      later.onclick = () => { setSaved(r, "wishlist"); renderBasket(); render(); };
+      rm.onclick = () => { setSaved(r, "basket", false); renderBasket(); render(); };
+      const later = el("button", "rmbtn", wish.has(r.key) ? "On wishlist" : "Save for later"); later.disabled = wish.has(r.key); later.type = "button";
+      later.onclick = () => { setSaved(r, "wishlist", true); later.textContent = "On wishlist"; later.disabled = true; render(); };
       right.append(safe(o.url) ? Object.assign(el("a", "shop", money(o.price)), {href: o.url, target: "_blank", rel: "noopener"}) : el("span", "", money(o.price)), document.createTextNode(" "), later, document.createTextNode(" "), rm);
       li.append(left, right); ul.append(li);
     });
@@ -878,7 +972,7 @@ function renderBasket(){
     const ul = el("ul");
     plan.missing.forEach(r => {
       const li = el("li"), left = el("div"), rm = el("button", "rmbtn", "Remove"); rm.type = "button";
-      rm.onclick = () => { setSaved(r, null); renderBasket(); render(); };
+      rm.onclick = () => { setSaved(r, "basket", false); renderBasket(); render(); };
       left.append(el("span", "bt", r.title), el("span", "bm", [r.artists, r.label, r.cat].filter(Boolean).join(", ")));
       li.append(left, rm); ul.append(li);
     });
@@ -890,7 +984,7 @@ function renderBasket(){
     const lines = Object.keys(byShop).sort().flatMap(s => [s + ":", ...byShop[s].map(i => "- " + items[i].artists + " - " + items[i].title + " (" + items[i].cat + ") " + plan.opts[i][s].url), ""]);
     try { await navigator.clipboard.writeText(lines.join("\n")); copy.textContent = "Copied"; } catch (e) { copy.textContent = "Couldn't copy"; }
   };
-  clear.onclick = () => { [...basket].forEach(k => { basket.delete(k); pushSaved(k, "", null); }); saveSaved(); updateManageButton(); renderBasket(); render(); };
+  clear.onclick = () => { [...basket].forEach(k => { basket.delete(k); pushSaved(k, "", "basket", false); }); saveSaved(); updateManageButton(); renderBasket(); render(); };
   act.append(copy, clear); body.append(act);
   body.append(el("p", "mmeta", "Shipping is estimated from each shop's rates to Sydney. Pre-orders often ship on release day, so they can arrive separately. Check each shop's cart before paying. Your basket and wishlist are saved to your account when you are signed in, and on this device."));
 }
@@ -942,7 +1036,7 @@ async function refreshIfNeeded(){
   } catch (e) { storeSession(null); updateAuthUi(); notice("You've been signed out. Sign in again to sync your follows."); }
 }
 function updateAuthUi(){
-  $("authBtn").textContent = session ? "Account" : "Sign in";
+  $("authBtn").textContent = session ? "Sign out" : "Sign in"; $("authBtn").title = session ? "Signed in as " + (session.email || "your account") : "";
   $("sform").hidden = !!session; $("sout").hidden = !session;
   $("stitle").textContent = session ? "Your account" : "Sign in";
   $("swho").textContent = session ? (session.email || "your account") : "";
@@ -955,12 +1049,12 @@ function pushFollow(key, on){
     : sb("/rest/v1/follows?label_key=eq." + encodeURIComponent(key), {method: "DELETE"});
   call.catch(err => { if (session) notice("Couldn't save that to your account: " + err.message); });
 }
-function pushSaved(key, title, list){
+function pushSaved(key, title, list, on){
   if (!SB || !session) return;
-  const call = list
+  const call = on
     ? sb("/rest/v1/saved_items", {method: "POST", headers: {Prefer: "resolution=merge-duplicates,return=minimal"},
                                   body: JSON.stringify([{user_id: jwtClaims(session.access_token).sub, item_key: key, list, title}])})
-    : sb("/rest/v1/saved_items?item_key=eq." + encodeURIComponent(key), {method: "DELETE"});
+    : sb("/rest/v1/saved_items?item_key=eq." + encodeURIComponent(key) + "&list=eq." + list, {method: "DELETE"});
   call.catch(err => { if (session) notice("Couldn't save that to your account: " + err.message); });
 }
 async function syncSaved(){
@@ -1008,7 +1102,7 @@ async function syncFollows(){
     try { session = JSON.parse(localStorage.getItem(AKEY) || "null"); } catch (e) {}
   }
   updateAuthUi();
-  $("authBtn").onclick = () => { updateAuthUi(); sdlg.showModal ? sdlg.showModal() : sdlg.setAttribute("open", ""); };
+  $("authBtn").onclick = () => { if (session) { $("ssignout").onclick(); return; } updateAuthUi(); sdlg.showModal ? sdlg.showModal() : sdlg.setAttribute("open", ""); };
   $("sclose").onclick = () => { sdlg.close ? sdlg.close() : sdlg.removeAttribute("open"); };
   sdlg.addEventListener("click", e => { if (e.target === sdlg) $("sclose").click(); });
   $("sform").onsubmit = async e => {
