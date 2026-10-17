@@ -202,6 +202,15 @@ button.listen{font:inherit;font-size:.82rem;background:none;border:0;padding:0;c
 body.has-player{padding-bottom:5.5rem}
 @media (max-width:700px){.player{grid-template-columns:3.2rem minmax(0,1fr) auto auto}.pseek{grid-column:1/-1}body.has-player{padding-bottom:8rem}}
 button.manage{font:inherit;padding:.3rem .7rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;font-weight:600}
+nav.site{display:flex;gap:1.4rem;padding:.2rem clamp(1rem,4vw,3rem) .6rem;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+nav.site a{color:var(--ink);font-weight:700;text-decoration:none;padding:.25rem 0;border-bottom:3px solid transparent}
+nav.site a[aria-current=page]{border-bottom-color:var(--ink)}
+nav.site a:focus-visible,.backlink:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
+#manageview{padding:0 clamp(1rem,4vw,3rem) 3rem;max-width:72rem}
+#manageview .mhead,#manageview .mnote,#manageview .mtools,#manageview #mlist{padding-left:0;padding-right:0}
+#manageview #mlist{overflow:visible}
+a.followbtn{text-decoration:none;text-align:center;display:inline-block}
+.seebtn{font:inherit;font-size:.82rem;background:none;border:0;padding:0;color:var(--teal);font-weight:600;cursor:pointer;text-align:left}
 dialog{border:1px solid var(--ink);background:var(--paper);color:var(--ink);padding:0;width:min(62rem,calc(100vw - 2rem));max-height:88vh;font-family:var(--font)}
 dialog[open]{display:flex;flex-direction:column}
 dialog::backdrop{background:rgba(21,38,44,.55)}
@@ -233,13 +242,15 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
   <h1>New from the labels you follow</h1>
   <p class="meta" id="meta"></p>
 </header>
+<nav class="site" aria-label="Pages"><a href="#/" id="navHome">New releases</a><a href="#/labels" id="navLabels">Labels</a><a href="#/artists" id="navArtists">Artists</a></nav>
+<p class="notice" id="notice" role="status" hidden></p>
+<div id="homeview">
 <div class="bar">
   <div class="tabs" id="tabs"></div>
   <span id="count" aria-live="polite"></span>
   <div class="controls">
     <input type="search" id="q" placeholder="Search artist, title or catalogue number" aria-label="Search artist, title or catalogue number">
     <button type="button" class="manage" id="authBtn">Sign in</button>
-    <button type="button" class="manage" id="manageBtn">Manage labels</button>
     <details class="multi" id="labels"><summary>All my labels</summary><div class="panel" id="labelpanel"></div></details>
     <details class="multi" id="genres"><summary>All genres</summary><div class="panel" id="genrepanel"></div></details>
     <label>Shop <select id="shop"></select></label>
@@ -247,22 +258,22 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
     <label class="check"><input type="checkbox" id="hide"> Hide sold out</label>
   </div>
 </div>
-<p class="notice" id="notice" role="status" hidden></p>
 <main class="grid" id="grid"></main>
 <p class="empty" id="empty" hidden>No releases match. Choose All to see everything.</p>
 <footer>Totals are the price of one record plus shipping to Sydney, converted to Australian dollars. Shipping per record drops when you buy several from the same shop.</footer>
-<dialog id="manage" aria-labelledby="mtitle">
-  <div class="mhead"><div><h2 id="mtitle">Labels and artists</h2><p class="mcount" id="mcount"></p></div><button type="button" class="followbtn" id="mclose">Done</button></div>
-  <p class="mnote">Follow a label or an artist to put their releases on your home page. Labels marked "full catalogue" are tracked in full. For everything else you see what the shops' new-release pages have caught, so an artist's releases on labels you don't follow appear when the shops list them.</p>
+</div>
+<section id="manageview" hidden aria-labelledby="mtitle">
+  <div class="mhead"><div><h2 id="mtitle"></h2><p class="mcount" id="mcount"></p></div><a class="followbtn backlink" href="#/">Back to releases</a></div>
+  <p class="mnote" id="mnote"></p>
   <div class="mtools">
-    <input type="search" id="mq" placeholder="Search labels" aria-label="Search labels">
+    <input type="search" id="mq" placeholder="Search" aria-label="Search">
     <label>Sort <select id="msort"><option value="n">Most releases</option><option value="az">A to Z</option><option value="followed">Followed first</option></select></label>
-    <label>Following <select id="mkind"><option value="labels">Labels</option><option value="artists">Artists</option></select></label>
     <label>Show <select id="mshow"><option value="all">All</option><option value="following">Following</option><option value="not">Not following</option><option value="full">Full catalogue</option></select></label>
+    <label>Genre <select id="mgenre"></select></label>
     <label>Releases <select id="mmin"><option value="1">Any</option><option value="2">2 or more</option><option value="5">5 or more</option><option value="10">10 or more</option></select></label>
   </div>
   <ul id="mlist"></ul>
-</dialog>
+</section>
 <dialog id="signin" aria-labelledby="stitle">
   <div class="mhead"><h2 id="stitle">Sign in</h2><button type="button" class="followbtn" id="sclose">Close</button></div>
   <form id="sform">
@@ -338,6 +349,12 @@ const labelBox = document.getElementById("labels");
 const labelSummary = labelBox.querySelector("summary");
 const labelPanel = document.getElementById("labelpanel");
 const NAME = {}; D.labels.forEach(l => { NAME[l.key] = l.name; }); D.artists.forEach(a => { NAME[a.key] = a.name; });
+const LG = {}, AG = {};   // how many releases each label / artist has in each genre
+D.releases.forEach(r => r.genres.forEach(g => {
+  (LG[r.lkey] = LG[r.lkey] || {})[g] = (LG[r.lkey][g] || 0) + 1;
+  r.akeys.forEach(k => { (AG[k] = AG[k] || {})[g] = (AG[k][g] || 0) + 1; });
+}));
+const topGenres = o => Object.entries(o || {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(e => e[0]);
 const isFollowedRel = r => followed.has(r.lkey) || r.akeys.some(k => followed.has(k));
 const clearBtn = el("button", "clearbtn", "Clear selection"); clearBtn.type = "button";
 function labelText(){
@@ -591,21 +608,24 @@ function render(){
   document.getElementById("count").textContent = list.length + (list.length === 1 ? " release" : " releases");
   const emptyEl = document.getElementById("empty");
   emptyEl.hidden = list.length > 0;
-  emptyEl.textContent = followed.size === 0 ? "You aren't following any labels or artists yet. Choose Manage follows to pick some."
+  emptyEl.textContent = followed.size === 0 ? "You aren't following any labels or artists yet. Open Labels or Artists to pick some."
                                             : "No releases match. Choose All to see everything.";
 }
 // ---- Manage labels (follow / unfollow) ----
-const dlg = $("manage"), mlist = $("mlist");
+const mlist = $("mlist");
+let mKind = "labels";
 function saveFollows(){ try { localStorage.setItem(FKEY, JSON.stringify([...followed])); } catch (e) {} }
-function updateManageButton(){ $("manageBtn").textContent = "Manage follows (" + followed.size + ")"; }
+function updateManageButton(){ $("navLabels").textContent = "Labels (" + nFollowed("labels") + ")"; $("navArtists").textContent = "Artists (" + nFollowed("artists") + ")"; }
 const nFollowed = kind => [...followed].filter(k => k.startsWith("a:") === (kind === "artists")).length;
 function followChanged(){ saveFollows(); updateManageButton(); buildLabelFilter(); buildGenreFilter(); render(); }
 let mShown = 200;
 function renderManage(reset = true){
   if (reset) mShown = 200;
   const q = norm($("mq").value), show = $("mshow").value, minN = +$("mmin").value, sortBy = $("msort").value;
-  const kind = $("mkind").value, items = kind === "artists" ? D.artists : D.labels;
-  const rows = items.filter(l =>
+  const kind = mKind, items = kind === "artists" ? D.artists : D.labels, GM = kind === "artists" ? AG : LG, gsel = $("mgenre").value;
+  $("mshow").querySelector('[value="full"]').hidden = kind === "artists";
+  if (kind === "artists" && $("mshow").value === "full") $("mshow").value = "all";
+  const rows = items.filter(l => (!gsel || (GM[l.key] || {})[gsel]) &&
     (!q || norm(l.name).includes(q)) && l.n >= minN &&
     (show === "all" || (show === "following" && followed.has(l.key)) || (show === "not" && !followed.has(l.key)) || (show === "full" && l.full)));
   const byName = (a, b) => a.name.localeCompare(b.name, "en", {sensitivity: "base"});
@@ -622,8 +642,14 @@ function renderManage(reset = true){
       if (letter !== lastLetter) { lastLetter = letter; mlist.append(el("li", "mletter", letter)); }
     }
     const li = el("li"), info = el("div"), btn = el("button", "followbtn");
+    const tg = topGenres(GM[l.key]);
     info.append(el("span", "mname", l.name),
-                el("span", "mmeta", l.n + (l.n === 1 ? " release" : " releases") + (l.full ? ", full catalogue" : "")));
+                el("span", "mmeta", l.n + (l.n === 1 ? " release" : " releases") + (l.full ? ", full catalogue" : "") + (tg.length ? " · " + tg.join(", ") : "")));
+    if (followed.has(l.key)) {
+      const see = el("button", "seebtn", "See releases"); see.type = "button";
+      see.onclick = () => showReleases(kind, l);
+      info.append(see);
+    }
     btn.type = "button";
     const paint = () => {
       const on = followed.has(l.key);
@@ -634,6 +660,7 @@ function renderManage(reset = true){
     btn.onclick = () => {
       followed.has(l.key) ? followed.delete(l.key) : followed.add(l.key);
       paint(); followChanged(); pushFollow(l.key, followed.has(l.key));
+      if (!(show === "following" || show === "not" || sortBy === "followed")) renderManage(false);
       if (show === "following" || show === "not" || sortBy === "followed") renderManage(false);
       else $("mcount").textContent = $("mcount").textContent.replace(/You follow \d+\./, "You follow " + nFollowed(kind) + ".");
     };
@@ -646,11 +673,39 @@ function renderManage(reset = true){
     more.append(mb); mlist.append(more);
   }
 }
-$("manageBtn").onclick = () => { renderManage(); dlg.showModal ? dlg.showModal() : dlg.setAttribute("open", ""); };
-$("mclose").onclick = () => { dlg.close ? dlg.close() : dlg.removeAttribute("open"); };
-dlg.addEventListener("click", e => { if (e.target === dlg) $("mclose").click(); });
-$("mq").oninput = () => renderManage(); ["msort", "mshow", "mmin", "mkind"].forEach(id => { $(id).onchange = () => renderManage(); });
-updateManageButton(); buildLabelFilter(); buildGenreFilter();
+// ---- The Labels and Artists pages (the address ends #/labels or #/artists) ----
+function showReleases(kind, item){
+  state.q = ""; $("q").value = ""; state.labels.clear();
+  if (kind === "labels") state.labels.add(item.key);
+  else { state.q = norm(item.name); $("q").value = item.name; }
+  buildLabelFilter(); render(); location.hash = "#/";
+}
+function fillGenreSelect(){
+  const sel = $("mgenre"), present = new Set();
+  D.releases.forEach(r => r.genres.forEach(g => present.add(g)));
+  const order = (D.genreOrder || []).filter(g => present.has(g));
+  sel.replaceChildren();
+  [["", "Any genre"], ...order.map(g => [g, g])].forEach(([v, t]) => { const o = el("option", "", t); o.value = v; sel.append(o); });
+}
+function route(){
+  const h = location.hash, kind = h === "#/labels" ? "labels" : h === "#/artists" ? "artists" : "home";
+  $("homeview").hidden = kind !== "home"; $("manageview").hidden = kind === "home";
+  [["navHome", "home"], ["navLabels", "labels"], ["navArtists", "artists"]].forEach(([id, k]) => {
+    if (k === kind) $(id).setAttribute("aria-current", "page"); else $(id).removeAttribute("aria-current");
+  });
+  if (kind !== "home") {
+    if (mKind !== kind) { mKind = kind; $("mq").value = ""; $("mshow").value = "all"; $("mgenre").value = ""; }
+    $("mtitle").textContent = kind === "labels" ? "Labels" : "Artists";
+    $("mnote").textContent = kind === "labels"
+      ? 'Follow a label to put its releases on your home page. Labels marked "full catalogue" are tracked in full; for the others you see what the shops\' new-release pages catch.'
+      : "Follow an artist to see their releases on your home page, even from labels you don't follow. Their full catalogue is fetched from each shop every morning.";
+    renderManage();
+    window.scrollTo(0, 0);
+  }
+}
+window.addEventListener("hashchange", route);
+$("mq").oninput = () => renderManage(); ["msort", "mshow", "mmin", "mgenre"].forEach(id => { $(id).onchange = () => renderManage(); });
+updateManageButton(); buildLabelFilter(); buildGenreFilter(); fillGenreSelect(); route();
 
 // ---- Accounts: sign in by emailed link; follows saved to your account (Supabase) ----
 const SB = D.supabase;
@@ -718,7 +773,7 @@ async function syncFollows(){
       await sb("/rest/v1/follows", {method: "POST", headers: {Prefer: "resolution=ignore-duplicates,return=minimal"},
                body: JSON.stringify([...followed].map(k => ({label_key: k, label_name: NAME[k] || k})))});
     }
-    followChanged(); if (dlg.open) renderManage(false);
+    followChanged(); if (!$("manageview").hidden) renderManage(false);
   } catch (err) { if (session) notice("Couldn't sync your follows with your account: " + err.message); }
 }
 (function startAccounts(){
