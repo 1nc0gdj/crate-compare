@@ -557,6 +557,59 @@
   "yoyaku:Soul": [],
   "yoyaku:Vocal": [],
   "yoyaku:World": [],
-  "yoyaku:Electronic": []
+  "yoyaku:Electronic": [],
+  "deejay:Pop / Heavy-Metal": [],
+  "deejay:Pop / Country": [],
+  "deejay:Pop / Death-Metal": [],
+  "deejay:Pop / Blues": [],
+  "deejay:Hip-Hop / Avantgarde": [],
+  "deejay:Beats / Spoken Words": [],
+  "deejay:Beats / Balkan": [],
+  "deejay:Beats / Abstract": [
+   "Experimental / IDM"
+  ],
+  "deejay:Beats / Industrial": [
+   "Experimental / IDM"
+  ],
+  "deejay:Pop / Leftfield": [
+   "Experimental / IDM"
+  ],
+  "deejay:House / Latin": [
+   "House"
+  ],
+  "deejay:House / Urban Dance": [
+   "House"
+  ],
+  "deejay:Beats / Chill-Out": [
+   "Downtempo / Balearic"
+  ],
+  "deejay:Techno / Bleep": [
+   "Techno"
+  ],
+  "deejay:Techno / Chicago": [
+   "Techno"
+  ],
+  "deejay:Techno / Tekno": [
+   "Techno"
+  ],
+  "deejay:Techno / Uk Hardcore": [
+   "Techno"
+  ],
+  "deejay:Trance / Hardtrance": [
+   "Trance"
+  ],
+  "yoyaku:Bleep": [
+   "Techno"
+  ],
+  "yoyaku:New Beat": [
+   "Techno"
+  ],
+  "yoyaku:Italo Disco": [
+   "Disco"
+  ],
+  "yoyaku:Tribal House": [
+   "House"
+  ],
+  "yoyaku:New Jack Swing": []
  }
 }

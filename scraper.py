@@ -825,6 +825,8 @@ def run(slug):
     have = {L.url for L in scraped}
     for base in label_pages:                # full catalogue of labels people follow, page by page
         for n in range(1, MAX_LABEL_PAGES + 1):
+            if n > 1 and page_url(slug, base, n) == base:     # this shop's paging isn't known here: don't fetch page 1 twice
+                break
             fresh = [L for L in adapter.scrape([page_url(slug, base, n)]) if L.url not in have]
             if not fresh:
                 break
