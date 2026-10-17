@@ -2,9 +2,11 @@
  "genres": [
   "Techno",
   "Deep & Dub Techno",
-  "Minimal / Tech House",
+  "Minimal House",
+  "Tech House",
   "Deep House",
   "House",
+  "Electro House",
   "Electro / Detroit",
   "Acid",
   "Ambient / Drone",
@@ -12,6 +14,7 @@
   "Experimental / IDM",
   "Breaks / Bass",
   "Jungle / D&B",
+  "Garage / UK Garage",
   "Trance",
   "Psy / Goa",
   "Disco"
@@ -45,7 +48,7 @@
    "Breaks / Bass"
   ],
   "juno:UK Garage": [
-   "Breaks / Bass"
+   "Garage / UK Garage"
   ],
   "juno:Experimental / Electronic": [
    "Experimental / IDM"
@@ -66,7 +69,7 @@
    "House"
   ],
   "juno:Electro House": [
-   "House"
+   "Electro House"
   ],
   "juno:Funky / Club House": [
    "House"
@@ -75,7 +78,8 @@
    "House"
   ],
   "juno:Minimal / Tech House": [
-   "Minimal / Tech House"
+   "Minimal House",
+   "Tech House"
   ],
   "juno:Electro": [
    "Electro / Detroit"
@@ -135,17 +139,17 @@
    "Deep House"
   ],
   "yoyaku:Minimal": [
-   "Minimal / Tech House"
+   "Minimal House"
   ],
   "yoyaku:Minimal House": [
-   "Minimal / Tech House"
+   "Minimal House"
   ],
   "yoyaku:Tech House": [
-   "Minimal / Tech House"
+   "Tech House"
   ],
   "yoyaku:Minimal Techno": [
    "Techno",
-   "Minimal / Tech House"
+   "Minimal House"
   ],
   "yoyaku:Electro": [
    "Electro / Detroit"
@@ -160,7 +164,7 @@
    "Breaks / Bass"
   ],
   "yoyaku:UK Garage": [
-   "Breaks / Bass"
+   "Garage / UK Garage"
   ],
   "yoyaku:Drum & Bass": [
    "Jungle / D&B"
@@ -240,14 +244,14 @@
    "Deep & Dub Techno"
   ],
   "deejay:House / Tech": [
-   "Minimal / Tech House"
+   "Tech House"
   ],
   "deejay:House / Minimal": [
-   "Minimal / Tech House"
+   "Minimal House"
   ],
   "deejay:Techno / Minimal": [
    "Techno",
-   "Minimal / Tech House"
+   "Minimal House"
   ],
   "deejay:House / Electro": [
    "Electro / Detroit"
@@ -297,7 +301,7 @@
    "Breaks / Bass"
   ],
   "deejay:Beats / Uk Garage": [
-   "Breaks / Bass"
+   "Garage / UK Garage"
   ],
   "deejay:Beats / Bass": [
    "Breaks / Bass"
@@ -309,7 +313,7 @@
    "Breaks / Bass"
   ],
   "deejay:House / Garage": [
-   "Breaks / Bass"
+   "Garage / UK Garage"
   ],
   "deejay:House / Dance": [
    "House"
@@ -518,7 +522,7 @@
    "House"
   ],
   "yoyaku:Electro House": [
-   "House"
+   "Electro House"
   ],
   "yoyaku:Hard Techno": [
    "Techno"
