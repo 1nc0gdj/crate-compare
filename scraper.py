@@ -727,8 +727,9 @@ def fetch_followed_keys():
     except Exception as e:
         print(f"  could not read followed labels from Supabase ({e}); carrying on without them")
         return set()
-    print(f"  {len(rows)} labels are followed on the site")
-    return {row["lkey"] for row in rows if row.get("lkey")}
+    keys = {row["lkey"] for row in rows if row.get("lkey") and not row["lkey"].startswith("a:")}   # "a:" keys are followed artists
+    print(f"  {len(keys)} labels are followed on the site")
+    return keys
 
 
 def followed_label_pages(slug, keys):

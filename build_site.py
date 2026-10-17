@@ -28,7 +28,7 @@ def build():
     rows = con.execute(
         """SELECT r.id, r.title, COALESCE(lb.name, '') AS label, r.catalogue_no, r.format,
                   r.release_date, r.artwork_url,
-                  (SELECT group_concat(a.name, ', ') FROM release_artists ra
+                  (SELECT group_concat(a.name, char(31)) FROM release_artists ra
                      JOIN artists a ON a.id = ra.artist_id WHERE ra.release_id = r.id) AS artists,
                   rt.name AS shop, rt.slug AS slug, rt.currency AS ship_cur, rt.ship_first_item AS ship,
                   li.price, li.currency, li.status, li.url, li.preview_url, li.first_seen, li.previews, li.genres
@@ -44,7 +44,9 @@ def build():
     releases = {}
     for r in rows:
         rel = releases.setdefault(r["id"], {
-            "title": r["title"], "artists": r["artists"] or "", "label": r["label"], "lkey": scraper.name_key(r["label"]),
+            "title": r["title"], "artists": ", ".join((r["artists"] or "").split("\x1f")) if r["artists"] else "",
+            "akeys": sorted({"a:" + scraper.simple_key(n) for n in (r["artists"] or "").split("\x1f") if scraper.simple_key(n)} - {"a:various", "a:variousartists"}),
+            "anames": [n for n in (r["artists"] or "").split("\x1f") if n], "label": r["label"], "lkey": scraper.name_key(r["label"]),
             "cat": r["catalogue_no"] or "", "format": r["format"] or "",
             "date": r["release_date"] or "", "art": r["artwork_url"] or "", "added": "", "offers": [], "genres": [],
         })
@@ -84,11 +86,22 @@ def build():
     labels = sorted(({"key": k, "name": names[k], "n": counts[k], "full": k in seed} for k in counts),
                     key=lambda l: (-l["n"], l["name"].lower()))
 
+    # Artists: one entry each, with a release count (the same name written two ways counts as one)
+    art = {}
+    for rel in out:
+        for k, n in zip([("a:" + scraper.simple_key(n)) for n in rel["anames"]], rel["anames"]):
+            if k in rel["akeys"]:
+                e = art.setdefault(k, {"key": k, "name": n, "n": 0})
+                e["n"] += 1
+    artists = sorted(art.values(), key=lambda a: (-a["n"], a["name"].lower()))
+    for rel in out:
+        del rel["anames"]
+
     cfg = scraper.load_config()
     data = {
         "supabase": ({"url": cfg["supabase_url"].rstrip("/"), "key": cfg["supabase_key"]}
                      if cfg.get("supabase_url") and cfg.get("supabase_key") else None),
-        "labels": labels, "defaults": list(seed), "genreOrder": gcfg.get("genres", []),
+        "labels": labels, "artists": artists, "defaults": list(seed), "genreOrder": gcfg.get("genres", []),
         "generated": date.today().isoformat(),
         "gbp": round(rates["GBP"], 2), "eur": round(rates["EUR"], 2),
         "releases": out,
@@ -240,12 +253,13 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 <p class="empty" id="empty" hidden>No releases match. Choose All to see everything.</p>
 <footer>Totals are the price of one record plus shipping to Sydney, converted to Australian dollars. Shipping per record drops when you buy several from the same shop.</footer>
 <dialog id="manage" aria-labelledby="mtitle">
-  <div class="mhead"><div><h2 id="mtitle">All labels</h2><p class="mcount" id="mcount"></p></div><button type="button" class="followbtn" id="mclose">Done</button></div>
-  <p class="mnote">Follow a label to put its releases on your home page. Labels marked "full catalogue" are tracked in full. For the others you see what the shops' new-release pages have caught.</p>
+  <div class="mhead"><div><h2 id="mtitle">Labels and artists</h2><p class="mcount" id="mcount"></p></div><button type="button" class="followbtn" id="mclose">Done</button></div>
+  <p class="mnote">Follow a label or an artist to put their releases on your home page. Labels marked "full catalogue" are tracked in full. For everything else you see what the shops' new-release pages have caught, so an artist's releases on labels you don't follow appear when the shops list them.</p>
   <div class="mtools">
     <input type="search" id="mq" placeholder="Search labels" aria-label="Search labels">
     <label>Sort <select id="msort"><option value="n">Most releases</option><option value="az">A to Z</option><option value="followed">Followed first</option></select></label>
-    <label>Show <select id="mshow"><option value="all">All labels</option><option value="following">Following</option><option value="not">Not following</option><option value="full">Full catalogue</option></select></label>
+    <label>Following <select id="mkind"><option value="labels">Labels</option><option value="artists">Artists</option></select></label>
+    <label>Show <select id="mshow"><option value="all">All</option><option value="following">Following</option><option value="not">Not following</option><option value="full">Full catalogue</option></select></label>
     <label>Releases <select id="mmin"><option value="1">Any</option><option value="2">2 or more</option><option value="5">5 or more</option><option value="10">10 or more</option></select></label>
   </div>
   <ul id="mlist"></ul>
@@ -324,7 +338,8 @@ const uniq = f => [...new Set(D.releases.map(f))].filter(Boolean).sort();
 const labelBox = document.getElementById("labels");
 const labelSummary = labelBox.querySelector("summary");
 const labelPanel = document.getElementById("labelpanel");
-const NAME = {}; D.labels.forEach(l => { NAME[l.key] = l.name; });
+const NAME = {}; D.labels.forEach(l => { NAME[l.key] = l.name; }); D.artists.forEach(a => { NAME[a.key] = a.name; });
+const isFollowedRel = r => followed.has(r.lkey) || r.akeys.some(k => followed.has(k));
 const clearBtn = el("button", "clearbtn", "Clear selection"); clearBtn.type = "button";
 function labelText(){
   const n = state.labels.size;
@@ -357,7 +372,7 @@ function genreText(){
 }
 function buildGenreFilter(){
   const counts = {};
-  D.releases.forEach(r => { if (followed.has(r.lkey)) relGenres(r).forEach(g => { counts[g] = (counts[g] || 0) + 1; }); });
+  D.releases.forEach(r => { if (isFollowedRel(r)) relGenres(r).forEach(g => { counts[g] = (counts[g] || 0) + 1; }); });
   [...state.genres].forEach(g => { if (!counts[g]) state.genres.delete(g); });
   const order = D.genreOrder || [];
   const rank = g => g === NOGENRE ? 1e6 : (order.indexOf(g) < 0 ? 1e5 : order.indexOf(g));
@@ -413,7 +428,7 @@ SORTS.forEach(([key, name]) => { const o = el("option", "", name); o.value = key
 sortSel.onchange = () => { state.sort = sortSel.value; render(); };
 
 function matches(r){
-  if (!followed.has(r.lkey)) return false;
+  if (!isFollowedRel(r)) return false;
   if (state.labels.size && !state.labels.has(r.lkey)) return false;
   if (state.format !== "all" && r.format !== state.format) return false;
   if (state.genres.size && !relGenres(r).some(g => state.genres.has(g))) return false;
@@ -579,26 +594,28 @@ function render(){
   document.getElementById("count").textContent = list.length + (list.length === 1 ? " release" : " releases");
   const emptyEl = document.getElementById("empty");
   emptyEl.hidden = list.length > 0;
-  emptyEl.textContent = followed.size === 0 ? "You aren't following any labels yet. Choose Manage labels to pick some."
+  emptyEl.textContent = followed.size === 0 ? "You aren't following any labels or artists yet. Choose Manage follows to pick some."
                                             : "No releases match. Choose All to see everything.";
 }
 // ---- Manage labels (follow / unfollow) ----
 const dlg = $("manage"), mlist = $("mlist");
 function saveFollows(){ try { localStorage.setItem(FKEY, JSON.stringify([...followed])); } catch (e) {} }
-function updateManageButton(){ $("manageBtn").textContent = "Manage labels (" + followed.size + ")"; }
+function updateManageButton(){ $("manageBtn").textContent = "Manage follows (" + followed.size + ")"; }
+const nFollowed = kind => [...followed].filter(k => k.startsWith("a:") === (kind === "artists")).length;
 function followChanged(){ saveFollows(); updateManageButton(); buildLabelFilter(); buildGenreFilter(); render(); }
 let mShown = 200;
 function renderManage(reset = true){
   if (reset) mShown = 200;
   const q = norm($("mq").value), show = $("mshow").value, minN = +$("mmin").value, sortBy = $("msort").value;
-  const rows = D.labels.filter(l =>
+  const kind = $("mkind").value, items = kind === "artists" ? D.artists : D.labels;
+  const rows = items.filter(l =>
     (!q || norm(l.name).includes(q)) && l.n >= minN &&
     (show === "all" || (show === "following" && followed.has(l.key)) || (show === "not" && !followed.has(l.key)) || (show === "full" && l.full)));
   const byName = (a, b) => a.name.localeCompare(b.name, "en", {sensitivity: "base"});
   if (sortBy === "az") rows.sort(byName);
   else if (sortBy === "followed") rows.sort((a, b) => (followed.has(b.key) - followed.has(a.key)) || (b.n - a.n) || byName(a, b));
   else rows.sort((a, b) => (b.n - a.n) || byName(a, b));
-  $("mcount").textContent = "Showing " + rows.length + " of " + D.labels.length + " labels. You follow " + followed.size + ".";
+  $("mcount").textContent = "Showing " + rows.length + " of " + items.length + " " + kind + ". You follow " + nFollowed(kind) + ".";
   mlist.replaceChildren();
   let lastLetter = "";
   rows.slice(0, mShown).forEach(l => {
@@ -621,11 +638,11 @@ function renderManage(reset = true){
       followed.has(l.key) ? followed.delete(l.key) : followed.add(l.key);
       paint(); followChanged(); pushFollow(l.key, followed.has(l.key));
       if (show === "following" || show === "not" || sortBy === "followed") renderManage(false);
-      else $("mcount").textContent = $("mcount").textContent.replace(/You follow \d+\./, "You follow " + followed.size + ".");
+      else $("mcount").textContent = $("mcount").textContent.replace(/You follow \d+\./, "You follow " + nFollowed(kind) + ".");
     };
     paint(); li.append(info, btn); mlist.append(li);
   });
-  if (!rows.length) mlist.append(el("li", "", "No labels match."));
+  if (!rows.length) mlist.append(el("li", "", "Nothing matches."));
   else if (rows.length > mShown) {
     const more = el("li", "mmore"), mb = el("button", "followbtn", "Show more (" + (rows.length - mShown) + " left)");
     mb.type = "button"; mb.onclick = () => { mShown += 200; renderManage(false); };
@@ -635,7 +652,7 @@ function renderManage(reset = true){
 $("manageBtn").onclick = () => { renderManage(); dlg.showModal ? dlg.showModal() : dlg.setAttribute("open", ""); };
 $("mclose").onclick = () => { dlg.close ? dlg.close() : dlg.removeAttribute("open"); };
 dlg.addEventListener("click", e => { if (e.target === dlg) $("mclose").click(); });
-$("mq").oninput = () => renderManage(); ["msort", "mshow", "mmin"].forEach(id => { $(id).onchange = () => renderManage(); });
+$("mq").oninput = () => renderManage(); ["msort", "mshow", "mmin", "mkind"].forEach(id => { $(id).onchange = () => renderManage(); });
 updateManageButton(); buildLabelFilter(); buildGenreFilter();
 
 // ---- Accounts: sign in by emailed link; follows saved to your account (Supabase) ----
