@@ -106,3 +106,11 @@ CREATE TABLE IF NOT EXISTS label_pages (
   url         TEXT NOT NULL,
   PRIMARY KEY (label_id, retailer_id)
 );
+
+-- Where each artist's own page lives at each shop (used to fetch a followed artist's full catalogue)
+CREATE TABLE IF NOT EXISTS artist_pages (
+  artist_id   INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+  retailer_id INTEGER NOT NULL REFERENCES retailers(id),
+  url         TEXT NOT NULL,
+  PRIMARY KEY (artist_id, retailer_id)
+);

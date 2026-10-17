@@ -44,6 +44,7 @@ class Listing:
     previews: list | None = None      # [{'title': ..., 'url': ...}] direct audio links
     label_url: str | None = None      # the label's own page at this shop
     genres: list | None = None        # the shop's own genre labels, exactly as written there
+    artist_urls: dict | None = None   # {artist name: that artist's own page at this shop}
 
 
 def norm_cat(cat: str | None) -> str | None:
@@ -196,6 +197,9 @@ class JunoAdapter(Adapter):
             previews=previews or None,
             label_url=urljoin(self.BASE, label["href"]) if label else None,
             genres=genres or None,
+            artist_urls={a.get_text(strip=True): urljoin(self.BASE, a["href"])
+                         for a in node.select('a[href*="/artists/"]')
+                         if a.get_text(strip=True) and "?" not in a["href"]} or None,
         )
 
 
@@ -337,6 +341,8 @@ class DeejayAdapter(Adapter):
             release_date=release_date, previews=previews or None,
             label_url=urljoin(self.BASE, label_el["href"]) if label_el else None,
             genres=genres or None,
+            artist_urls={a.get_text(strip=True): urljoin(self.BASE, a["href"])
+                         for a in node.select("h2 a[href]") if a.get_text(strip=True)} or None,
         )
 
 
@@ -350,6 +356,7 @@ class YoyakuAdapter(Adapter):
     """
     slug = "yoyaku"
     deep_keys = None     # set by run(): the followed labels
+    deep_artists = None  # set by run(): the followed artists (simple_key form)
     max_deep = None      # set by run(): cap on slow checks per run
     BASE = "https://yoyaku.io"
     PRICE = re.compile(r"(\d{1,3}(?:\.\d{3})*,\d{2})\s*\u20ac")
@@ -373,12 +380,13 @@ class YoyakuAdapter(Adapter):
         for i in out:                      # a record can show up on a label page and in a feed
             unique.setdefault(i.url, i)
         out = list(unique.values())
-        deep = [i for i in out if self.deep_keys is None or name_key(i.label) in self.deep_keys]
+        deep = [i for i in out if self.deep_keys is None or name_key(i.label) in self.deep_keys
+                or any(simple_key(a) in (self.deep_artists or ()) for a in i.artists)]
         if self.max_deep and len(deep) > self.max_deep:
             print(f"  limiting the slow check to {self.max_deep} of {len(deep)} releases this run")
             deep = deep[:self.max_deep]
         print(f"  checking {len(deep)} of {len(out)} release pages for stock status and tracks "
-              f"(only labels you follow get this slower check)...")
+              f"(only labels and artists you follow get this slower check)...")
         for item in deep:
             self.confirm_status(item)
         return out
@@ -512,6 +520,8 @@ class YoyakuAdapter(Adapter):
             catalogue_no=norm_cat(cat), format=fmt, price=price, currency="EUR",
             status=status, url=url, preview_url=url, artwork_url=art, release_date=None,
             label_url=urljoin(self.BASE, label_el["href"]), genres=styles or None,
+            artist_urls={a.get_text(strip=True): urljoin(self.BASE, a["href"])
+                         for a in node.select('a[href*="/artist/"]') if a.get_text(strip=True)} or None,
         )
 
 
@@ -664,6 +674,11 @@ def upsert(con, L: Listing):
         con.execute("INSERT OR IGNORE INTO label_pages (label_id, retailer_id, url) VALUES (?,?,?)",
                     (label_id, retailer_id, L.label_url))
 
+    for aname, aurl in (L.artist_urls or {}).items():      # remember each artist's own page here
+        aid = get_or_create(con, "artists", aname)
+        con.execute("INSERT OR IGNORE INTO artist_pages (artist_id, retailer_id, url) VALUES (?,?,?)",
+                    (aid, retailer_id, aurl))
+
     # 2) Upsert this retailer's listing.
     con.execute(
         """INSERT INTO listings (release_id, retailer_id, url, price, currency, status, preview_url, previews, genres)
@@ -712,10 +727,11 @@ def load_config():
 
 
 def fetch_followed_keys():
-    """Labels that anyone follows on the site (names and counts only), from the Supabase database."""
+    """What anyone follows on the site (names and counts only), from the Supabase database.
+    Returns (label keys, artist keys); artists are stored with an 'a:' prefix."""
     cfg = load_config()
     if not cfg.get("supabase_url") or not cfg.get("supabase_key"):
-        return set()
+        return set(), set()
     try:
         r = requests.post(
             cfg["supabase_url"].rstrip("/") + "/rest/v1/rpc/followed_labels",
@@ -725,11 +741,25 @@ def fetch_followed_keys():
         r.raise_for_status()
         rows = r.json()
     except Exception as e:
-        print(f"  could not read followed labels from Supabase ({e}); carrying on without them")
-        return set()
-    keys = {row["lkey"] for row in rows if row.get("lkey") and not row["lkey"].startswith("a:")}   # "a:" keys are followed artists
-    print(f"  {len(keys)} labels are followed on the site")
-    return keys
+        print(f"  could not read follows from Supabase ({e}); carrying on without them")
+        return set(), set()
+    keys = [row["lkey"] for row in rows if row.get("lkey")]
+    labels = {k for k in keys if not k.startswith("a:")}
+    artists = {k[2:] for k in keys if k.startswith("a:")}
+    print(f"  {len(labels)} labels and {len(artists)} artists are followed on the site")
+    return labels, artists
+
+
+def followed_artist_pages(slug, keys):
+    """This shop's page for each followed artist, taken from pages we've already seen listed."""
+    if not keys:
+        return []
+    con = connect()
+    rows = con.execute(
+        """SELECT a.name, ap.url FROM artist_pages ap
+           JOIN artists a ON a.id = ap.artist_id
+           JOIN retailers rt ON rt.id = ap.retailer_id WHERE rt.slug = ?""", (slug,)).fetchall()
+    return [r["url"] for r in rows if simple_key(r["name"]) in keys]
 
 
 def followed_label_pages(slug, keys):
@@ -783,11 +813,13 @@ def run(slug):
     if not urls:
         print(f"{slug}: nothing to scrape.")
         return
-    cloud_keys = fetch_followed_keys()
+    cloud_keys, artist_keys = fetch_followed_keys()
     label_pages = [u for u in followed_label_pages(slug, cloud_keys) if u not in urls]
+    label_pages += [u for u in followed_artist_pages(slug, artist_keys) if u not in urls and u not in label_pages]
     adapter = ADAPTERS[slug]()
     if slug == "yoyaku" and follows:
         adapter.deep_keys = {name_key(f["name"]) for f in follows} | cloud_keys
+        adapter.deep_artists = artist_keys
         adapter.max_deep = MAX_DEEP_CHECKS
     scraped = adapter.scrape(urls)
     have = {L.url for L in scraped}

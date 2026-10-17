@@ -243,7 +243,6 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
     <details class="multi" id="labels"><summary>All my labels</summary><div class="panel" id="labelpanel"></div></details>
     <details class="multi" id="genres"><summary>All genres</summary><div class="panel" id="genrepanel"></div></details>
     <label>Shop <select id="shop"></select></label>
-    <label>Format <select id="format"></select></label>
     <label>Sort <select id="sort"></select></label>
     <label class="check"><input type="checkbox" id="hide"> Hide sold out</label>
   </div>
@@ -288,7 +287,7 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 const D = JSON.parse(document.getElementById("data").textContent);
 const STATUS = {in_stock:["In stock","ok"], preorder:["Pre-order","pre"], sold_out:["Sold out","out"], unknown:["Stock unknown","unk"]};
 const VIEWS = [["all","All"],["in_stock","In stock"],["preorder","Pre-order"],["sold_out","Sold out"]];
-const state = {view:"all", labels:new Set(), shop:"all", format:"all", q:"", hide:false, sort:"new", genres:new Set()};
+const state = {view:"all", labels:new Set(), shop:"all", q:"", hide:false, sort:"new", genres:new Set()};
 const norm = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[\s\-_.]+/g, "");
 D.releases.forEach((r, i) => {
   r.id = i;
@@ -363,7 +362,7 @@ clearBtn.onclick = () => { state.labels.clear(); labelPanel.querySelectorAll("in
 const genreBox = document.getElementById("genres");
 const genreSummary = genreBox.querySelector("summary");
 const genrePanel = document.getElementById("genrepanel");
-const NOGENRE = "Unsorted";
+const NOGENRE = "Non-electronic";
 const gclear = el("button", "clearbtn", "Clear selection"); gclear.type = "button";
 const relGenres = r => r.genres.length ? r.genres : [NOGENRE];
 function genreText(){
@@ -396,7 +395,6 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape" && genreBox.open) { genreBox.open = false; genreSummary.focus(); }
 });
 fill("shop", "shop", "All shops", [...new Set(D.releases.flatMap(r => r.offers.map(o => o.shop)))].sort());
-fill("format", "format", "All formats", uniq(r => r.format));
 document.getElementById("q").oninput = e => { state.q = norm(e.target.value); render(); };
 document.getElementById("hide").onchange = e => { state.hide = e.target.checked; render(); };
 
@@ -430,7 +428,6 @@ sortSel.onchange = () => { state.sort = sortSel.value; render(); };
 function matches(r){
   if (!isFollowedRel(r)) return false;
   if (state.labels.size && !state.labels.has(r.lkey)) return false;
-  if (state.format !== "all" && r.format !== state.format) return false;
   if (state.genres.size && !relGenres(r).some(g => state.genres.has(g))) return false;
   if (state.q && !r.hay.includes(state.q)) return false;
   const offs = state.shop === "all" ? r.offers : r.offers.filter(o => o.shop === state.shop);
