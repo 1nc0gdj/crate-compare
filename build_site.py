@@ -97,11 +97,16 @@ def build():
     for rel in out:
         del rel["anames"]
 
+    shops = {r["name"]: {"first": round(r["ship_first_item"] * rates[r["currency"]], 2),
+                         "extra": round(r["ship_extra_item"] * rates[r["currency"]], 2)}
+             for r in con.execute("SELECT name, currency, ship_first_item, ship_extra_item FROM retailers")
+             if r["name"] in {o["shop"] for rel in out for o in rel["offers"]}}
+
     cfg = scraper.load_config()
     data = {
         "supabase": ({"url": cfg["supabase_url"].rstrip("/"), "key": cfg["supabase_key"]}
                      if cfg.get("supabase_url") and cfg.get("supabase_key") else None),
-        "labels": labels, "artists": artists, "defaults": list(seed), "genreOrder": gcfg.get("genres", []),
+        "labels": labels, "artists": artists, "shops": shops, "defaults": list(seed), "genreOrder": gcfg.get("genres", []),
         "generated": date.today().isoformat(),
         "gbp": round(rates["GBP"], 2), "eur": round(rates["EUR"], 2),
         "releases": out,
@@ -202,6 +207,27 @@ button.listen{font:inherit;font-size:.82rem;background:none;border:0;padding:0;c
 body.has-player{padding-bottom:5.5rem}
 @media (max-width:700px){.player{grid-template-columns:3.2rem minmax(0,1fr) auto auto}.pseek{grid-column:1/-1}body.has-player{padding-bottom:8rem}}
 button.manage{font:inherit;padding:.3rem .7rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;font-weight:600}
+.savedacts{display:grid;gap:.4rem;margin:.6rem 0 0}
+.basketbtn.alt{background:var(--paper);color:var(--teal);border-color:var(--teal)}
+.basketbtn.alt[aria-pressed=true]{background:var(--teal);color:var(--paper)}
+#wishview{padding:0 clamp(1rem,4vw,3rem) 3rem}
+#wishview .mhead,#wishview .mnote{padding-left:0;padding-right:0}
+.basketbtn{font:inherit;font-weight:700;margin:0;padding:.35rem .8rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;width:100%}
+.basketbtn[aria-pressed=true]{background:var(--ink);color:var(--paper)}
+.basketbtn:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
+#basketview{padding:0 clamp(1rem,4vw,3rem) 3rem;max-width:56rem}
+#basketview .mhead{padding-left:0;padding-right:0}
+.bsum{margin:.2rem 0 1rem;padding:1rem 1.2rem;border:2px solid var(--ink);background:var(--paper)}
+.bsum strong{font-size:1.5rem;font-stretch:115%}
+.bshop{margin:0 0 1.2rem;border:1px solid var(--ink);background:var(--paper)}
+.bshop h3{margin:0;padding:.6rem 1rem;background:var(--ink);color:var(--paper);display:flex;justify-content:space-between;gap:1rem;font-size:1rem}
+.bshop ul{list-style:none;margin:0;padding:0 1rem}
+.bshop li{display:flex;justify-content:space-between;gap:1rem;align-items:baseline;padding:.6rem 0;border-bottom:1px solid var(--rule)}
+.bshop li .bt{font-weight:700;display:block}
+.bshop li .bm{display:block;color:var(--dim);font-size:.82rem}
+.bshop .bfoot{padding:.6rem 1rem;display:flex;justify-content:space-between;gap:1rem;font-weight:700}
+.bactions{display:flex;gap:.8rem;flex-wrap:wrap;margin:1rem 0}
+.rmbtn{font:inherit;font-size:.82rem;background:none;border:0;padding:0;color:var(--teal);font-weight:600;cursor:pointer}
 nav.site{display:flex;gap:1.4rem;padding:.2rem clamp(1rem,4vw,3rem) .6rem;border-bottom:1px solid var(--rule);flex-wrap:wrap}
 nav.site a{color:var(--ink);font-weight:700;text-decoration:none;padding:.25rem 0;border-bottom:3px solid transparent}
 nav.site a[aria-current=page]{border-bottom-color:var(--ink)}
@@ -242,11 +268,12 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
   <h1>New from the labels you follow</h1>
   <p class="meta" id="meta"></p>
 </header>
-<nav class="site" aria-label="Pages"><a href="#/" id="navHome">New releases</a><a href="#/labels" id="navLabels">Labels</a><a href="#/artists" id="navArtists">Artists</a></nav>
+<nav class="site" aria-label="Pages"><a href="#/" id="navHome">New releases</a><a href="#/labels" id="navLabels">Labels</a><a href="#/artists" id="navArtists">Artists</a><a href="#/wishlist" id="navWishlist">Wishlist</a><a href="#/basket" id="navBasket">Basket</a></nav>
 <p class="notice" id="notice" role="status" hidden></p>
 <div id="homeview">
 <div class="bar">
   <div class="tabs" id="tabs"></div>
+  <div class="tabs" id="srctabs" role="group" aria-label="Releases from"></div>
   <span id="count" aria-live="polite"></span>
   <div class="controls">
     <input type="search" id="q" placeholder="Search artist, title or catalogue number" aria-label="Search artist, title or catalogue number">
@@ -262,6 +289,15 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 <p class="empty" id="empty" hidden>No releases match. Choose All to see everything.</p>
 <footer>Totals are the price of one record plus shipping to Sydney, converted to Australian dollars. Shipping per record drops when you buy several from the same shop.</footer>
 </div>
+<section id="wishview" hidden aria-labelledby="wtitle">
+  <div class="mhead"><div><h2 id="wtitle">Wishlist</h2><p class="mcount" id="wsub"></p></div><a class="followbtn backlink" href="#/">Back to releases</a></div>
+  <p class="mnote" id="wnote">Records you might buy. They stay here, out of your basket, until you move them across or remove them.</p>
+  <main class="grid" id="wgrid"></main>
+</section>
+<section id="basketview" hidden aria-labelledby="btitle">
+  <div class="mhead"><div><h2 id="btitle">Basket</h2><p class="mcount" id="bsub"></p></div><a class="followbtn backlink" href="#/">Back to releases</a></div>
+  <div id="bbody"></div>
+</section>
 <section id="manageview" hidden aria-labelledby="mtitle">
   <div class="mhead"><div><h2 id="mtitle"></h2><p class="mcount" id="mcount"></p></div><a class="followbtn backlink" href="#/">Back to releases</a></div>
   <p class="mnote" id="mnote"></p>
@@ -298,10 +334,25 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 const D = JSON.parse(document.getElementById("data").textContent);
 const STATUS = {in_stock:["In stock","ok"], preorder:["Pre-order","pre"], sold_out:["Sold out","out"], unknown:["Stock unknown","unk"]};
 const VIEWS = [["all","All"],["in_stock","In stock"],["preorder","Pre-order"],["sold_out","Sold out"]];
-const state = {view:"all", labels:new Set(), shop:"all", q:"", hide:false, sort:"new", genres:new Set()};
+const state = {view:"all", labels:new Set(), shop:"all", q:"", hide:false, sort:"new", genres:new Set(), src:"both"};
+const SKEY = "crate-compare-src", BKEY = "crate-compare-basket", WKEY = "crate-compare-wishlist";
+try { const v = localStorage.getItem(SKEY); if (v === "labels" || v === "artists") state.src = v; } catch (e) {}
+let basket = new Set();
+try { basket = new Set(JSON.parse(localStorage.getItem(BKEY) || "[]")); } catch (e) {}
+let wish = new Set();
+try { wish = new Set(JSON.parse(localStorage.getItem(WKEY) || "[]")); } catch (e) {}
+function saveSaved(){ try { localStorage.setItem(BKEY, JSON.stringify([...basket])); localStorage.setItem(WKEY, JSON.stringify([...wish])); } catch (e) {} }
+// a record is in the basket, on the wishlist, or neither: never both
+function setSaved(r, list){
+  basket.delete(r.key); wish.delete(r.key);
+  if (list === "basket") basket.add(r.key);
+  if (list === "wishlist") wish.add(r.key);
+  saveSaved(); updateManageButton(); pushSaved(r.key, r.title, list);
+}
 const norm = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[\s\-_.]+/g, "");
 D.releases.forEach((r, i) => {
   r.id = i;
+  r.key = r.lkey + "|" + (r.cat || "") + "|" + r.title.toLowerCase();
   r.hay = norm(r.title + " " + r.artists + " " + r.cat);
   r.addedMs = r.added ? Date.parse(r.added.replace(" ", "T") + "Z") : 0;
 });
@@ -331,6 +382,17 @@ metaEl.textContent =
   "Prices are delivered to Sydney in Australian dollars. Rates on " + nice(D.generated) +
   ": 1 GBP = A$" + D.gbp.toFixed(2) + ", 1 EUR = A$" + D.eur.toFixed(2) + ".";
 
+const srctabs = document.getElementById("srctabs");
+[["both", "Labels and artists"], ["labels", "Labels"], ["artists", "Artists"]].forEach(([key, name]) => {
+  const b = el("button", "", name); b.type = "button";
+  b.setAttribute("aria-pressed", key === state.src);
+  b.onclick = () => {
+    state.src = key; [...srctabs.children].forEach(x => x.setAttribute("aria-pressed", x === b));
+    try { localStorage.setItem(SKEY, key); } catch (e) {}
+    buildGenreFilter(); render();
+  };
+  srctabs.append(b);
+});
 const tabs = document.getElementById("tabs");
 VIEWS.forEach(([key, name]) => {
   const b = el("button", "", name); b.type = "button";
@@ -356,6 +418,8 @@ D.releases.forEach(r => r.genres.forEach(g => {
 }));
 const topGenres = o => Object.entries(o || {}).sort((a, b) => b[1] - a[1]).slice(0, 3).map(e => e[0]);
 const isFollowedRel = r => followed.has(r.lkey) || r.akeys.some(k => followed.has(k));
+const inSource = r => state.src === "labels" ? followed.has(r.lkey)
+                    : state.src === "artists" ? r.akeys.some(k => followed.has(k)) : isFollowedRel(r);
 const clearBtn = el("button", "clearbtn", "Clear selection"); clearBtn.type = "button";
 function labelText(){
   const n = state.labels.size;
@@ -388,7 +452,7 @@ function genreText(){
 }
 function buildGenreFilter(){
   const counts = {};
-  D.releases.forEach(r => { if (isFollowedRel(r)) relGenres(r).forEach(g => { counts[g] = (counts[g] || 0) + 1; }); });
+  D.releases.forEach(r => { if (inSource(r)) relGenres(r).forEach(g => { counts[g] = (counts[g] || 0) + 1; }); });
   [...state.genres].forEach(g => { if (!counts[g]) state.genres.delete(g); });
   const order = D.genreOrder || [];
   const rank = g => g === NOGENRE ? 1e6 : (order.indexOf(g) < 0 ? 1e5 : order.indexOf(g));
@@ -443,7 +507,7 @@ SORTS.forEach(([key, name]) => { const o = el("option", "", name); o.value = key
 sortSel.onchange = () => { state.sort = sortSel.value; render(); };
 
 function matches(r){
-  if (!isFollowedRel(r)) return false;
+  if (!inSource(r)) return false;
   if (state.labels.size && !state.labels.has(r.lkey)) return false;
   if (state.genres.size && !relGenres(r).some(g => state.genres.has(g))) return false;
   if (state.q && !r.hay.includes(state.q)) return false;
@@ -455,6 +519,21 @@ function matches(r){
   return offs.some(o => o.status === state.view);
 }
 
+function savedButtons(r){
+  const box = el("div", "savedacts"), bb = el("button", "basketbtn"), wb = el("button", "basketbtn alt");
+  bb.type = wb.type = "button";
+  const buyable = r.offers.some(o => avail(o) && o.price != null);
+  const paint = () => {
+    const inB = basket.has(r.key), inW = wish.has(r.key);
+    bb.textContent = inB ? "In basket (remove)" : "Add to basket"; bb.setAttribute("aria-pressed", inB);
+    wb.textContent = inW ? "Saved for later (remove)" : "Save for later"; wb.setAttribute("aria-pressed", inW);
+    bb.hidden = !buyable && !inB;
+  };
+  bb.onclick = () => { setSaved(r, basket.has(r.key) ? null : "basket"); paint(); if (location.hash === "#/wishlist") renderWishlist(); };
+  wb.onclick = () => { setSaved(r, wish.has(r.key) ? null : "wishlist"); paint(); if (location.hash === "#/wishlist") renderWishlist(); };
+  paint(); box.append(bb, wb);
+  return box;
+}
 function card(r){
   const a = el("article", "sleeve");
   a.dataset.rel = r.id;
@@ -498,6 +577,7 @@ function card(r){
   });
   if (src) a.append(trackList(r, src));
   a.append(ul);
+  a.append(savedButtons(r));
   return a;
 }
 
@@ -608,14 +688,16 @@ function render(){
   document.getElementById("count").textContent = list.length + (list.length === 1 ? " release" : " releases");
   const emptyEl = document.getElementById("empty");
   emptyEl.hidden = list.length > 0;
-  emptyEl.textContent = followed.size === 0 ? "You aren't following any labels or artists yet. Open Labels or Artists to pick some."
+  emptyEl.textContent = (state.src === "artists" && nFollowed("artists") === 0) ? "You aren't following any artists yet. Open Artists to pick some."
+                      : (state.src === "labels" && nFollowed("labels") === 0) ? "You aren't following any labels yet. Open Labels to pick some."
+                      : followed.size === 0 ? "You aren't following any labels or artists yet. Open Labels or Artists to pick some."
                                             : "No releases match. Choose All to see everything.";
 }
 // ---- Manage labels (follow / unfollow) ----
 const mlist = $("mlist");
 let mKind = "labels";
 function saveFollows(){ try { localStorage.setItem(FKEY, JSON.stringify([...followed])); } catch (e) {} }
-function updateManageButton(){ $("navLabels").textContent = "Labels (" + nFollowed("labels") + ")"; $("navArtists").textContent = "Artists (" + nFollowed("artists") + ")"; }
+function updateManageButton(){ $("navLabels").textContent = "Labels (" + nFollowed("labels") + ")"; $("navArtists").textContent = "Artists (" + nFollowed("artists") + ")"; $("navBasket").textContent = "Basket (" + basket.size + ")"; $("navWishlist").textContent = "Wishlist (" + wish.size + ")"; }
 const nFollowed = kind => [...followed].filter(k => k.startsWith("a:") === (kind === "artists")).length;
 function followChanged(){ saveFollows(); updateManageButton(); buildLabelFilter(); buildGenreFilter(); render(); }
 let mShown = 200;
@@ -688,12 +770,14 @@ function fillGenreSelect(){
   [["", "Any genre"], ...order.map(g => [g, g])].forEach(([v, t]) => { const o = el("option", "", t); o.value = v; sel.append(o); });
 }
 function route(){
-  const h = location.hash, kind = h === "#/labels" ? "labels" : h === "#/artists" ? "artists" : "home";
-  $("homeview").hidden = kind !== "home"; $("manageview").hidden = kind === "home";
-  [["navHome", "home"], ["navLabels", "labels"], ["navArtists", "artists"]].forEach(([id, k]) => {
+  const h = location.hash, kind = h === "#/labels" ? "labels" : h === "#/artists" ? "artists" : h === "#/basket" ? "basket" : h === "#/wishlist" ? "wishlist" : "home";
+  $("homeview").hidden = kind !== "home"; $("manageview").hidden = kind !== "labels" && kind !== "artists"; $("basketview").hidden = kind !== "basket"; $("wishview").hidden = kind !== "wishlist";
+  [["navHome", "home"], ["navLabels", "labels"], ["navArtists", "artists"], ["navBasket", "basket"], ["navWishlist", "wishlist"]].forEach(([id, k]) => {
     if (k === kind) $(id).setAttribute("aria-current", "page"); else $(id).removeAttribute("aria-current");
   });
-  if (kind !== "home") {
+  if (kind === "basket") { renderBasket(); window.scrollTo(0, 0); }
+  if (kind === "wishlist") { renderWishlist(); window.scrollTo(0, 0); }
+  if (kind === "labels" || kind === "artists") {
     if (mKind !== kind) { mKind = kind; $("mq").value = ""; $("mshow").value = "all"; $("mgenre").value = ""; }
     $("mtitle").textContent = kind === "labels" ? "Labels" : "Artists";
     $("mnote").textContent = kind === "labels"
@@ -702,6 +786,113 @@ function route(){
     renderManage();
     window.scrollTo(0, 0);
   }
+}
+// ---- Basket: the cheapest way to split your records across shops, shipping included ----
+const shopCost = (name, k) => k ? D.shops[name].first + D.shops[name].extra * (k - 1) : 0;
+function bestOffers(r){
+  const m = {};
+  r.offers.forEach(o => { if (avail(o) && o.price != null && (!m[o.shop] || o.price < m[o.shop].price)) m[o.shop] = o; });
+  return m;
+}
+function planBasket(items){
+  const names = Object.keys(D.shops), opts = items.map(bestOffers);
+  const idx = items.map((_, i) => i).filter(i => Object.keys(opts[i]).length);
+  const masks = [];
+  for (let m = 1; m < (1 << names.length); m++) masks.push(m);
+  const pop = m => m.toString(2).replace(/0/g, "").length;
+  masks.sort((a, b) => pop(a) - pop(b) || a - b);                 // fewer shops first, so ties go to fewer parcels
+  const costOf = assign => {
+    const per = {};
+    assign.forEach(([i, s]) => { per[s] = per[s] || {n: 0, items: 0}; per[s].n += 1; per[s].items += opts[i][s].price; });
+    return Object.entries(per).reduce((t, [s, v]) => t + v.items + shopCost(s, v.n), 0);
+  };
+  let best = null;
+  for (const m of masks) {
+    const S = names.filter((_, j) => m & (1 << j)), assign = [];
+    let ok = true;
+    for (const i of idx) {
+      let pick = null, pc = Infinity;
+      S.forEach(s => { const o = opts[i][s]; if (o && o.price + D.shops[s].extra < pc) { pc = o.price + D.shops[s].extra; pick = s; } });
+      if (!pick) { ok = false; break; }
+      assign.push([i, pick]);
+    }
+    if (!ok) continue;
+    const total = costOf(assign);
+    if (!best || total < best.total - 0.005) best = {assign, total};
+  }
+  // for comparison: every record bought on its own from its cheapest shop, and everything from one shop
+  const separate = idx.reduce((t, i) => t + Math.min(...Object.entries(opts[i]).map(([s, o]) => o.price + D.shops[s].first)), 0);
+  const single = names.filter(s => idx.every(i => opts[i][s])).map(s => ({
+    shop: s, total: idx.reduce((t, i) => t + opts[i][s].price, 0) + shopCost(s, idx.length)}))
+    .sort((a, b) => a.total - b.total)[0] || null;
+  return {best, opts, separate, single, missing: items.filter((_, i) => !idx.includes(i))};
+}
+function renderWishlist(){
+  const grid = $("wgrid"); grid.replaceChildren();
+  const items = D.releases.filter(r => wish.has(r.key)).sort((a, b) => b.date.localeCompare(a.date));
+  $("wsub").textContent = items.length + (items.length === 1 ? " record" : " records") + " saved for later";
+  items.forEach(r => grid.append(card(r)));
+  if (!items.length) grid.append(el("p", "mnote", "Nothing saved yet. Use Save for later on any release."));
+}
+function renderBasket(){
+  const body = $("bbody"); body.replaceChildren();
+  const items = D.releases.filter(r => basket.has(r.key));
+  $("bsub").textContent = items.length + (items.length === 1 ? " record" : " records") + " in your basket";
+  if (!items.length) {
+    body.append(el("p", "mnote", "Your basket is empty. Use Add to basket on any release (or move one over from your wishlist) and this page works out the cheapest way to buy them, shipping included."));
+    return;
+  }
+  const plan = planBasket(items), byShop = {};
+  if (plan.best) plan.best.assign.forEach(([i, s]) => { (byShop[s] = byShop[s] || []).push(i); });
+  const sum = el("div", "bsum");
+  if (plan.best) {
+    const shopsUsed = Object.keys(byShop).length;
+    sum.append(el("strong", "", money(plan.best.total)),
+               el("span", "", " delivered to Sydney, from " + shopsUsed + (shopsUsed === 1 ? " shop" : " shops")));
+    const notes = [];
+    if (plan.separate - plan.best.total > 0.5) notes.push("Saves " + money(plan.separate - plan.best.total) + " compared with buying each record on its own at its cheapest shop (" + money(plan.separate) + ").");
+    if (plan.single && plan.single.total - plan.best.total > 0.5) notes.push("Buying everything at " + plan.single.shop + " would cost " + money(plan.single.total) + ".");
+    notes.forEach(t => sum.append(el("p", "mmeta", t)));
+  } else sum.append(el("span", "", "None of these records can be bought right now."));
+  body.append(sum);
+  Object.keys(byShop).sort().forEach(s => {
+    const idxs = byShop[s], box = el("section", "bshop");
+    const sub = idxs.reduce((t, i) => t + plan.opts[i][s].price, 0), ship = shopCost(s, idxs.length);
+    const h = el("h3"); h.append(el("span", "", s), el("span", "", idxs.length + (idxs.length === 1 ? " record" : " records") + " · " + money(sub + ship)));
+    const ul = el("ul");
+    idxs.forEach(i => {
+      const r = items[i], o = plan.opts[i][s], li = el("li"), left = el("div"), right = el("div");
+      left.append(el("span", "bt", r.title), el("span", "bm", [r.artists, r.label, r.cat].filter(Boolean).join(", ") + (o.status === "preorder" ? " · pre-order" : "")));
+      const rm = el("button", "rmbtn", "Remove"); rm.type = "button";
+      rm.onclick = () => { setSaved(r, null); renderBasket(); render(); };
+      const later = el("button", "rmbtn", "Save for later"); later.type = "button";
+      later.onclick = () => { setSaved(r, "wishlist"); renderBasket(); render(); };
+      right.append(safe(o.url) ? Object.assign(el("a", "shop", money(o.price)), {href: o.url, target: "_blank", rel: "noopener"}) : el("span", "", money(o.price)), document.createTextNode(" "), later, document.createTextNode(" "), rm);
+      li.append(left, right); ul.append(li);
+    });
+    const foot = el("div", "bfoot"); foot.append(el("span", "", "Shipping to Sydney"), el("span", "", money(ship)));
+    box.append(h, ul, foot); body.append(box);
+  });
+  if (plan.missing.length) {
+    const box = el("section", "bshop"), h = el("h3"); h.append(el("span", "", "Not available right now"), el("span", "", String(plan.missing.length)));
+    const ul = el("ul");
+    plan.missing.forEach(r => {
+      const li = el("li"), left = el("div"), rm = el("button", "rmbtn", "Remove"); rm.type = "button";
+      rm.onclick = () => { setSaved(r, null); renderBasket(); render(); };
+      left.append(el("span", "bt", r.title), el("span", "bm", [r.artists, r.label, r.cat].filter(Boolean).join(", ")));
+      li.append(left, rm); ul.append(li);
+    });
+    box.append(h, ul); body.append(box);
+  }
+  const act = el("div", "bactions"), copy = el("button", "followbtn", "Copy shopping list"), clear = el("button", "followbtn", "Clear basket");
+  copy.type = clear.type = "button";
+  copy.onclick = async () => {
+    const lines = Object.keys(byShop).sort().flatMap(s => [s + ":", ...byShop[s].map(i => "- " + items[i].artists + " - " + items[i].title + " (" + items[i].cat + ") " + plan.opts[i][s].url), ""]);
+    try { await navigator.clipboard.writeText(lines.join("\n")); copy.textContent = "Copied"; } catch (e) { copy.textContent = "Couldn't copy"; }
+  };
+  clear.onclick = () => { [...basket].forEach(k => { basket.delete(k); pushSaved(k, "", null); }); saveSaved(); updateManageButton(); renderBasket(); render(); };
+  act.append(copy, clear); body.append(act);
+  body.append(el("p", "mmeta", "Shipping is estimated from each shop's rates to Sydney. Pre-orders often ship on release day, so they can arrive separately. Check each shop's cart before paying. Your basket and wishlist are saved to your account when you are signed in, and on this device."));
 }
 window.addEventListener("hashchange", route);
 $("mq").oninput = () => renderManage(); ["msort", "mshow", "mmin", "mgenre"].forEach(id => { $(id).onchange = () => renderManage(); });
@@ -764,6 +955,33 @@ function pushFollow(key, on){
     : sb("/rest/v1/follows?label_key=eq." + encodeURIComponent(key), {method: "DELETE"});
   call.catch(err => { if (session) notice("Couldn't save that to your account: " + err.message); });
 }
+function pushSaved(key, title, list){
+  if (!SB || !session) return;
+  const call = list
+    ? sb("/rest/v1/saved_items", {method: "POST", headers: {Prefer: "resolution=merge-duplicates,return=minimal"},
+                                  body: JSON.stringify([{user_id: jwtClaims(session.access_token).sub, item_key: key, list, title}])})
+    : sb("/rest/v1/saved_items?item_key=eq." + encodeURIComponent(key), {method: "DELETE"});
+  call.catch(err => { if (session) notice("Couldn't save that to your account: " + err.message); });
+}
+async function syncSaved(){
+  if (!SB || !session) return;
+  try {
+    const rows = await sb("/rest/v1/saved_items?select=item_key,list,title") || [];
+    if (rows.length) {                                                       // your account is the source of truth
+      basket = new Set(rows.filter(r => r.list === "basket").map(r => r.item_key));
+      wish = new Set(rows.filter(r => r.list === "wishlist").map(r => r.item_key));
+      saveSaved();
+    } else if (basket.size || wish.size) {                                   // first sign-in: save what's on this device
+      const uid = jwtClaims(session.access_token).sub, title = k => (D.releases.find(r => r.key === k) || {}).title || "";
+      await sb("/rest/v1/saved_items", {method: "POST", headers: {Prefer: "resolution=merge-duplicates,return=minimal"},
+               body: JSON.stringify([...[...basket].map(k => ({user_id: uid, item_key: k, list: "basket", title: title(k)})),
+                                     ...[...wish].map(k => ({user_id: uid, item_key: k, list: "wishlist", title: title(k)}))])});
+    }
+    updateManageButton(); render();
+    if (location.hash === "#/basket") renderBasket();
+    if (location.hash === "#/wishlist") renderWishlist();
+  } catch (err) { if (session) notice("Couldn't sync your basket and wishlist: " + err.message); }
+}
 async function syncFollows(){
   if (!SB || !session) return;
   try {
@@ -809,7 +1027,7 @@ async function syncFollows(){
     storeSession(null); updateAuthUi(); $("sclose").click();
     notice("Signed out. Your follows stay on this browser.");
   };
-  syncFollows();
+  syncFollows(); syncSaved();
 })();
 
 const nNew = D.releases.filter(isNew).length;
