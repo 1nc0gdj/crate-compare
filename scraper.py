@@ -774,6 +774,62 @@ def followed_label_pages(slug, keys):
     return [r["url"] for r in rows if name_key(r["name"]) in keys]
 
 
+def manual_label_pages(slug):
+    """label_pages.json: label page addresses you paste in by hand, e.g.
+    {"Altered Circuits": {"juno": "https://www.juno.co.uk/labels/Altered+Circuits+Belgium/"}}"""
+    p = Path("label_pages.json")
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text())
+    except ValueError as e:
+        print(f"  label_pages.json isn't valid ({e}); ignoring it")
+        return []
+    return [v[slug] for v in data.values() if isinstance(v, dict) and v.get(slug)]
+
+
+def labels_without_page(slug, keys, manual_urls):
+    """Names of followed labels this shop has no page for yet."""
+    con = connect()
+    have = {name_key(r["name"]) for r in con.execute(
+        """SELECT lb.name FROM label_pages lp JOIN labels lb ON lb.id = lp.label_id
+           JOIN retailers rt ON rt.id = lp.retailer_id WHERE rt.slug = ?""", (slug,))}
+    names = {}
+    for r in con.execute("SELECT name FROM labels"):
+        k = name_key(r["name"])
+        if k in keys and k not in have:
+            names.setdefault(k, r["name"])
+    return list(names.values())
+
+
+SEARCH_URLS = {"juno": "https://www.juno.co.uk/search/?q%5Ball%5D%5B%5D={q}&solrorder=relevancy"}
+MAX_DISCOVER = 12    # label searches per shop per run
+
+
+def discover_label_pages(slug, adapter, names, started):
+    """For followed labels this shop has no page for, search the shop for the label's name.
+    Releases found for exactly that label are kept, and the label's page address is remembered
+    (the next step then fetches its full catalogue)."""
+    if slug not in SEARCH_URLS or not names:
+        return [], []
+    found_listings, found_pages = [], []
+    for name in names[:MAX_DISCOVER]:
+        if time.time() - started > SHOP_BUDGET_SECONDS:
+            break
+        want = name_key(name)
+        url = SEARCH_URLS[slug].format(q=requests.utils.quote(name))
+        try:
+            hits = [L for L in adapter.scrape([url]) if L.label and name_key(L.label) == want]
+        except Exception as e:                 # a search that fails must never stop the run
+            print(f"  looking for {name} at {slug}: failed ({e})")
+            continue
+        pages = {L.label_url for L in hits if L.label_url}
+        print(f"  looking for {name} at {slug}: {len(hits)} releases, label page {'found' if pages else 'not found'}")
+        found_listings += hits
+        found_pages += sorted(pages)
+    return found_listings, found_pages
+
+
 def load_feeds():
     p = Path("feeds.json")
     return json.loads(p.read_text()) if p.exists() else {}
@@ -821,12 +877,18 @@ def run(slug):
     label_pages = [u for u in followed_label_pages(slug, cloud_keys) if u not in urls]
     label_pages += [u for u in followed_artist_pages(slug, artist_keys) if u not in urls and u not in label_pages]
     adapter = ADAPTERS[slug]()
+    label_pages += [u for u in manual_label_pages(slug) if u not in urls and u not in label_pages]
     if slug == "yoyaku" and follows:
         adapter.deep_keys = {name_key(f["name"]) for f in follows} | cloud_keys
         adapter.deep_artists = artist_keys
         adapter.max_deep = MAX_DEEP_CHECKS
     scraped = adapter.scrape(urls)
     have = {L.url for L in scraped}
+    missing = labels_without_page(slug, cloud_keys | {name_key(f["name"]) for f in follows}, label_pages)
+    extra, new_pages = discover_label_pages(slug, adapter, missing, started)
+    scraped += [L for L in extra if L.url not in have]
+    have.update(L.url for L in extra)
+    label_pages += [u for u in new_pages if u not in urls and u not in label_pages]
     if label_pages:                         # start somewhere different each day so pages skipped for time get their turn
         k = date.today().toordinal() % len(label_pages)
         label_pages = label_pages[k:] + label_pages[:k]
