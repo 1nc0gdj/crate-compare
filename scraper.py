@@ -802,7 +802,8 @@ def labels_without_page(slug, keys, manual_urls):
     return list(names.values())
 
 
-SEARCH_URLS = {"juno": "https://www.juno.co.uk/search/?q%5Ball%5D%5B%5D={q}&solrorder=relevancy"}
+SEARCH_URLS = {"juno": "https://www.juno.co.uk/search/?q%5Ball%5D%5B%5D={q}&solrorder=relevancy",
+               "yoyaku": "https://yoyaku.io/?s={q}&post_type=product"}
 MAX_DISCOVER = 12    # label searches per shop per run
 
 
@@ -828,6 +829,52 @@ def discover_label_pages(slug, adapter, names, started):
         found_listings += hits
         found_pages += sorted(pages)
     return found_listings, found_pages
+
+
+def fetch_requested_names():
+    """Artists and labels people asked for on the site (names only), from the Supabase database."""
+    cfg = load_config()
+    if not cfg.get("supabase_url") or not cfg.get("supabase_key"):
+        return []
+    try:
+        r = requests.post(cfg["supabase_url"].rstrip("/") + "/rest/v1/rpc/requested_names",
+                          headers={"apikey": cfg["supabase_key"], "Content-Type": "application/json"},
+                          data="{}", timeout=30)
+        r.raise_for_status()
+        rows = [(x["kind"], x["name"]) for x in r.json() if x.get("name")]
+    except Exception as e:
+        print(f"  could not read requests from Supabase ({e}); carrying on without them")
+        return []
+    print(f"  {len(rows)} artists/labels have been requested on the site")
+    return rows
+
+
+def discover_requested(slug, adapter, wanted, started):
+    """Search this shop for each requested artist or label. Keeps releases that really are by that
+    artist or on that label, and remembers their page addresses so the full catalogue gets fetched."""
+    if slug not in SEARCH_URLS or not wanted:
+        return [], []
+    found, pages = [], []
+    for kind, name in wanted[:MAX_DISCOVER * 2]:
+        if time.time() - started > SHOP_BUDGET_SECONDS:
+            break
+        url = SEARCH_URLS[slug].format(q=requests.utils.quote(name))
+        try:
+            results = adapter.scrape([url])
+        except Exception as e:
+            print(f"  looking for {kind} {name} at {slug}: failed ({e})")
+            continue
+        if kind == "label":
+            hits = [L for L in results if L.label and name_key(L.label) == name_key(name)]
+            urls = {L.label_url for L in hits if L.label_url}
+        else:
+            want = simple_key(name)
+            hits = [L for L in results if want in {simple_key(a) for a in L.artists}]
+            urls = {u for L in hits for a, u in (L.artist_urls or {}).items() if simple_key(a) == want}
+        print(f"  looking for {kind} {name} at {slug}: {len(hits)} releases, page {'found' if urls else 'not found'}")
+        found += hits
+        pages += sorted(urls)
+    return found, pages
 
 
 def load_feeds():
@@ -889,6 +936,10 @@ def run(slug):
     scraped += [L for L in extra if L.url not in have]
     have.update(L.url for L in extra)
     label_pages += [u for u in new_pages if u not in urls and u not in label_pages]
+    asked, asked_pages = discover_requested(slug, adapter, fetch_requested_names(), started)
+    scraped += [L for L in asked if L.url not in have]
+    have.update(L.url for L in asked)
+    label_pages += [u for u in asked_pages if u not in urls and u not in label_pages]
     if label_pages:                         # start somewhere different each day so pages skipped for time get their turn
         k = date.today().toordinal() % len(label_pages)
         label_pages = label_pages[k:] + label_pages[:k]

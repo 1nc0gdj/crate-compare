@@ -53,3 +53,31 @@ create policy "remove own saved" on public.saved_items for delete using (auth.ui
 -- If saved_items was created earlier with one list per record, allow a record in both lists
 alter table public.saved_items drop constraint if exists saved_items_pkey;
 alter table public.saved_items add primary key (user_id, item_key, list);
+
+
+-- Requests for artists and labels that aren't on the site yet
+create table if not exists public.requests (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  kind text not null check (kind in ('artist','label')),
+  name text not null check (char_length(name) between 2 and 120),
+  created_at timestamptz not null default now(),
+  primary key (user_id, kind, name)
+);
+alter table public.requests enable row level security;
+drop policy if exists "read own requests" on public.requests;
+drop policy if exists "add own requests" on public.requests;
+create policy "read own requests" on public.requests for select using (auth.uid() = user_id);
+create policy "add own requests" on public.requests for insert with check (auth.uid() = user_id);
+
+-- For the daily job: which names have been requested? (names only, no user details)
+create or replace function public.requested_names()
+returns table (kind text, name text)
+language sql
+security definer
+set search_path = public
+as $$
+  select distinct kind, name from public.requests
+$$;
+
+revoke all on function public.requested_names() from public;
+grant execute on function public.requested_names() to anon, authenticated;

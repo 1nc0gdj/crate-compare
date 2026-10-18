@@ -269,6 +269,7 @@ dialog::backdrop{background:rgba(21,38,44,.55)}
 #mlist{list-style:none;margin:0;padding:0 1.2rem 1rem;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(19rem,1fr));column-gap:2.2rem;align-content:start}
 #mlist li{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.6rem 0;border-bottom:1px solid var(--rule)}
 #mlist .mletter{grid-column:1/-1;display:block;font-weight:800;font-stretch:115%;font-size:1.15rem;padding:.9rem 0 .25rem;border-bottom:2px solid var(--ink)}
+#mlist .mrequest{grid-column:1/-1;justify-content:flex-start;gap:.8rem;flex-wrap:wrap;color:var(--dim)}
 #mlist .mmore{grid-column:1/-1;justify-content:center;border-bottom:0}
 .mcount{margin:.1rem 0 0;color:var(--dim);font-size:.9rem}
 .mtools label{color:var(--dim)}
@@ -821,11 +822,33 @@ function renderManage(reset = true){
     paint(); li.append(info, btn); mlist.append(li);
   });
   if (!rows.length) mlist.append(el("li", "", "Nothing matches."));
-  else if (rows.length > mShown) {
+  if (q.length >= 2) mlist.append(requestRow(kind, $("mq").value.trim()));
+  if (rows.length > mShown) {
     const more = el("li", "mmore"), mb = el("button", "followbtn", "Show more (" + (rows.length - mShown) + " left)");
     mb.type = "button"; mb.onclick = () => { mShown += 200; renderManage(false); };
     more.append(mb); mlist.append(more);
   }
+}
+// ---- Ask us to add an artist or label that isn't listed ----
+const REQ_KEY = "crate-compare-requests";
+function requestedBefore(kind, name){ try { return (JSON.parse(localStorage.getItem(REQ_KEY)) || []).includes(kind + ":" + name.toLowerCase()); } catch (e) { return false; } }
+function rememberRequest(kind, name){ try { const a = JSON.parse(localStorage.getItem(REQ_KEY)) || []; a.push(kind + ":" + name.toLowerCase()); localStorage.setItem(REQ_KEY, JSON.stringify(a)); } catch (e) {} }
+function requestRow(kind, name){
+  const one = kind === "artists" ? "artist" : "label";
+  const li = el("li", "mrequest"), msg = el("span", "", "Can't find " + one + " \u201c" + name + "\u201d? "), btn = el("button", "followbtn", "Request it");
+  btn.type = "button";
+  const done = () => { btn.hidden = true; msg.textContent = "Requested \u2014 we'll look for \u201c" + name + "\u201d at the shops. It should appear after the next daily refresh."; };
+  if (requestedBefore(one, name)) done();
+  btn.onclick = async () => {
+    if (!SB || !session) { notice("Sign in first (top right) so we can add your request."); return; }
+    btn.disabled = true;
+    try {
+      await sb("/rest/v1/requests", {method: "POST", headers: {Prefer: "resolution=merge-duplicates,return=minimal"},
+               body: JSON.stringify([{user_id: jwtClaims(session.access_token).sub, kind: one, name: name.slice(0, 120)}])});
+      rememberRequest(one, name); done();
+    } catch (err) { btn.disabled = false; notice("Couldn't send that request: " + err.message); }
+  };
+  li.append(msg, btn); return li;
 }
 // ---- The Labels and Artists pages (the address ends #/labels or #/artists) ----
 function showReleases(kind, item){
