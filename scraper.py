@@ -22,7 +22,7 @@ from bs4 import BeautifulSoup
 
 DB_PATH = "crate.db"
 HEADERS = {"User-Agent": "CrateCompare/0.1 (personal project; contact: you@example.com)"}
-DELAY_SECONDS = 3  # be polite: one request every few seconds
+DELAY_SECONDS = 2  # be polite: one request every few seconds
 
 
 # ---------- Normalised record every adapter must produce ----------
@@ -798,7 +798,11 @@ def expand_feed(slug):
     return [page_url(slug, base, n) for base in cfg.get("urls", []) for n in range(1, int(cfg.get("pages", 1)) + 1)]
 
 
+SHOP_BUDGET_SECONDS = 11 * 60  # most time one shop may spend on extra label/artist pages; whatever is done by then is saved
+
+
 def run(slug):
+    started = time.time()
     follows = load_follows()
     if follows:
         urls = []
@@ -823,8 +827,18 @@ def run(slug):
         adapter.max_deep = MAX_DEEP_CHECKS
     scraped = adapter.scrape(urls)
     have = {L.url for L in scraped}
-    for base in label_pages:                # full catalogue of labels people follow, page by page
+    if label_pages:                         # start somewhere different each day so pages skipped for time get their turn
+        k = date.today().toordinal() % len(label_pages)
+        label_pages = label_pages[k:] + label_pages[:k]
+    out_of_time = False
+    for i, base in enumerate(label_pages):  # full catalogue of labels people follow, page by page
+        if time.time() - started > SHOP_BUDGET_SECONDS:
+            print(f"  {slug}: time budget used up; skipping the remaining {len(label_pages) - i} label/artist pages until tomorrow's run")
+            out_of_time = True
+            break
         for n in range(1, MAX_LABEL_PAGES + 1):
+            if time.time() - started > SHOP_BUDGET_SECONDS:
+                break
             if n > 1 and page_url(slug, base, n) == base:     # this shop's paging isn't known here: don't fetch page 1 twice
                 break
             fresh = [L for L in adapter.scrape([page_url(slug, base, n)]) if L.url not in have]
