@@ -525,7 +525,139 @@ class YoyakuAdapter(Adapter):
         )
 
 
-ADAPTERS = {"juno": JunoAdapter, "deejay": DeejayAdapter, "yoyaku": YoyakuAdapter}
+# ---------- Closer adapter (Glenelg, South Australia; a Shopify store) ----------
+class CloserAdapter(Adapter):
+    """
+    Shopify stores publish their whole catalogue as plain data at /products.json, so there is no
+    page scraping here. Each product has: title 'Artist - Title', vendor = the label,
+    product_type = the format, tags = the genres, price in AUD, and an 'available' flag.
+    """
+    slug = "closer"
+    BASE = "https://closerclosercloser.com"
+    SKIP = ("gift", "voucher", "merch", "shirt", "tee", "tote", "slipmat", "cap", "hoodie", "poster", "sticker", "bag")
+
+    def scrape(self, urls):
+        out = []
+        for url in urls:
+            time.sleep(DELAY_SECONDS)
+            try:
+                r = requests.get(url, headers=HEADERS, timeout=30)
+                r.raise_for_status()
+                products = r.json().get("products", [])
+            except (requests.RequestException, ValueError) as e:
+                print(f"  {url} -> could not open ({e}); skipping")
+                continue
+            kept = []
+            for p in sorted(products, key=lambda x: x.get("published_at") or "", reverse=True):   # newest first
+                item = self.parse(p)
+                if item:
+                    self.ids[item.url] = p.get("id")
+                    kept.append(item)
+            print(f"  {url} -> {len(products)} products, {len(kept)} records")
+            out += kept
+        self.add_previews(out)
+        return out
+
+    MAX_PREVIEW_LOOKUPS = 60   # per run; records still without previews are picked up on later days
+
+    def __init__(self):
+        self.ids = {}            # record address -> Shopify product id
+        self.with_player = None  # product ids that have an audio player (fetched once per run)
+
+    def add_previews(self, listings):
+        """Closer uses a Shopify audio-player app. Its track list for a product is a public address:
+        /apps/awplayer/tracks?product_id=<id>  ->  {'tracks': [{'title': ..., 'url': ...}]}"""
+        try:
+            if self.with_player is None:
+                time.sleep(DELAY_SECONDS)
+                r = requests.get(f"{self.BASE}/apps/awplayer/products/ids", headers=HEADERS, timeout=30)
+                r.raise_for_status()
+                self.with_player = set(r.json().get("product_ids", []))
+            have = {row["url"] for row in connect().execute(
+                """SELECT li.url FROM listings li JOIN retailers rt ON rt.id = li.retailer_id
+                   WHERE rt.slug = 'closer' AND li.previews IS NOT NULL""")}
+        except Exception as e:
+            print(f"  closer previews: skipped ({e})")
+            return
+        todo = [L for L in listings if L.url not in have and self.ids.get(L.url) in self.with_player]
+        for L in todo[:self.MAX_PREVIEW_LOOKUPS]:
+            time.sleep(DELAY_SECONDS)
+            try:
+                r = requests.get(f"{self.BASE}/apps/awplayer/tracks", params={"product_id": self.ids[L.url]},
+                                 headers=HEADERS, timeout=30)
+                r.raise_for_status()
+                tracks = r.json().get("tracks", [])
+            except (requests.RequestException, ValueError):
+                continue
+            L.previews = [{"title": t.get("title") or f"Track {n}", "url": t["url"]}
+                          for n, t in enumerate(tracks, 1) if t.get("url")] or None
+            L.preview_url = L.previews[0]["url"] if L.previews else None
+        print(f"  closer previews: {min(len(todo), self.MAX_PREVIEW_LOOKUPS)} looked up, {max(0, len(todo) - self.MAX_PREVIEW_LOOKUPS)} left for later runs")
+
+    @staticmethod
+    def find_cat(p):
+        """The catalogue number: from the description if it says 'Cat ...', else from the cover image's file name."""
+        text = BeautifulSoup(p.get("body_html") or "", "html.parser").get_text(" ", strip=True)
+        m = re.search(r"\bcat(?:alogue)?(?:\s*(?:no|number|#))?\.?\s*[:#\-]?\s*([A-Z]{2,10}[ \-]?\d{1,4})\b", text, re.I)
+        if m:
+            return norm_cat(m.group(1))
+        m = re.search(r"\(([A-Z]{2,10}[ \-]?\d{1,4})\)", text[:400])     # e.g. 'Junction Forest (SHROOM12)'
+        if m:
+            return norm_cat(m.group(1))
+        for img in p.get("images") or []:
+            stem = (img.get("src") or "").split("?")[0].rsplit("/", 1)[-1].rsplit(".", 1)[0]
+            m = re.match(r"([A-Za-z]{2,10}[-_ ]?\d{1,4})(?:[-_ ]?(?:cover|front|back|sleeve|a|b))?$", stem, re.I)
+            if m:
+                return norm_cat(m.group(1))
+        m = re.search(r"-([a-z]{2,8}-?\d{2,4})$", p.get("handle") or "")      # some addresses end in the catalogue number
+        return norm_cat(m.group(1)) if m else None
+
+    def parse(self, p):
+        ptype = (p.get("product_type") or "").strip()
+        low = ptype.lower()
+        if not low or any(w in low.split() or w in low for w in self.SKIP):
+            return None
+        if not (re.search(r"vinyl|lp|\b(12|10|7)\s*(\"|inch|in)", low) or re.search(r"\b(12|10|7)\"", ptype)):
+            return None
+        title = (p.get("title") or "").strip()
+        if " - " in title:
+            artist_part, name = title.split(" - ", 1)
+        else:
+            artist_part, name = "", title
+        artists = [a.strip() for a in re.split(r",\s+|\s+\+\s+", artist_part) if a.strip()]
+        variants = p.get("variants") or [{}]
+        v = next((x for x in variants if x.get("available")), variants[0])
+        tags = [t.strip() for t in (p.get("tags") or []) if t.strip()]
+        tagtext = " ".join(tags).lower() + " " + low + " " + title.lower()
+        if not v.get("available"):
+            status = "sold_out"
+        elif "pre-order" in tagtext or "preorder" in tagtext or "pre order" in tagtext:
+            status = "preorder"
+        else:
+            status = "in_stock"
+        try:
+            price = float(v.get("price"))
+        except (TypeError, ValueError):
+            price = None
+        imgs = p.get("images") or []
+        return Listing(
+            retailer_slug=self.slug,
+            title=name or title,
+            artists=artists,
+            label=(p.get("vendor") or "").strip(),
+            catalogue_no=self.find_cat(p),
+            format=ptype,
+            price=price,
+            currency="AUD",
+            status=status,
+            url=f"{self.BASE}/products/{p.get('handle')}",
+            artwork_url=imgs[0].get("src") if imgs else None,
+            release_date=(p.get("published_at") or "")[:10] or None,   # when the shop listed it
+            genres=[t for t in tags if not re.search(r"pre-?order|new|sale|vinyl", t, re.I)] or None,
+        )
+
+
+ADAPTERS = {"juno": JunoAdapter, "deejay": DeejayAdapter, "yoyaku": YoyakuAdapter, "closer": CloserAdapter}
 
 # Pages to scrape: the label/artist pages for things you follow.
 # Keep this in a config file or table later; hardcoded to start.
@@ -550,6 +682,8 @@ SHIPPING = {
     # Yoyaku, measured from a real cart (cheapest option, EUR): 1 = 11.00, 2 = 13.80, 3 = 15.70.
     # The extra cost isn't constant (+2.80, then +1.90), so 'extra' is the average of the two.
     "yoyaku": {"first": 11.00, "extra": 2.35},
+    # Closer (AUD): flat rate to Sydney; the shop also says orders over A$180 ship free (not used in the planner yet).
+    "closer": {"first": 17.00, "extra": 0.00},   # AUD flat rate: 1, 2 or 3 records are all A$17 (checked by Jamie, 19 Oct 2026)
 }
 
 
@@ -584,6 +718,11 @@ def init_db():
         """INSERT OR IGNORE INTO retailers
            (slug, name, base_url, currency, ship_first_item, ship_extra_item, free_ship_over)
            VALUES ('yoyaku','Yoyaku','https://yoyaku.io','EUR', NULL, NULL, NULL)"""
+    )
+    con.execute(
+        """INSERT OR IGNORE INTO retailers
+           (slug, name, base_url, currency, ship_first_item, ship_extra_item, free_ship_over)
+           VALUES ('closer','Closer','https://closerclosercloser.com','AUD', NULL, NULL, 180)"""
     )
     for slug, s in SHIPPING.items():
         con.execute(
@@ -893,6 +1032,8 @@ def page_url(slug, base, n):
         return re.sub(r"/page_\d+$", f"/page_{n}", base)
     if slug == "yoyaku":
         return base.rstrip("/") + f"/page/{n}/"
+    if slug == "closer":
+        return base + ("&" if "?" in base else "?") + f"page={n}"
     return base
 
 
@@ -915,7 +1056,7 @@ def run(slug):
             else:
                 print(f"  {f['name']}: no {slug} page in follows.json yet; skipping")
     else:  # no follow list: fall back to the generic pages above
-        urls = {"juno": JUNO_URLS, "deejay": DEEJAY_URLS, "yoyaku": YOYAKU_URLS}[slug]
+        urls = {"juno": JUNO_URLS, "deejay": DEEJAY_URLS, "yoyaku": YOYAKU_URLS, "closer": []}[slug]
     urls += [u for u in expand_feed(slug) if u not in urls]
     if not urls:
         print(f"{slug}: nothing to scrape.")

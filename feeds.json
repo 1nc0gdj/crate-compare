@@ -24,5 +24,11 @@
     "urls": [
       "https://yoyaku.io/releases/"
     ]
+  },
+  "closer": {
+    "pages": 8,
+    "urls": [
+      "https://closerclosercloser.com/products.json?limit=250"
+    ]
   }
 }
