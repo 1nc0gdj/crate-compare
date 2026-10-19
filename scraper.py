@@ -940,6 +940,8 @@ def run(slug):
     scraped += [L for L in asked if L.url not in have]
     have.update(L.url for L in asked)
     label_pages += [u for u in asked_pages if u not in urls and u not in label_pages]
+    if slug == "juno":                      # ask Juno to include sold-out records too, so they show as sold out instead of missing
+        label_pages = [u if "show_out_of_stock" in u else u + ("&" if "?" in u else "?") + "show_out_of_stock=1" for u in label_pages]
     if label_pages:                         # start somewhere different each day so pages skipped for time get their turn
         k = date.today().toordinal() % len(label_pages)
         label_pages = label_pages[k:] + label_pages[:k]
