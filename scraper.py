@@ -582,7 +582,11 @@ class CloserAdapter(Adapter):
             return
         todo = [L for L in listings if L.url not in have and self.ids.get(L.url) in self.with_player]
         todo.sort(key=lambda L: L.status == "sold_out")   # records you can buy first (the sort keeps newest-first order within each group)
+        began, looked = time.time(), 0
         for L in todo[:self.MAX_PREVIEW_LOOKUPS]:
+            if time.time() - began > 8 * 60:      # never let previews eat the whole run
+                break
+            looked += 1
             time.sleep(1)       # one small request per record, so a shorter pause than for web pages
             try:
                 r = requests.get(f"{self.BASE}/apps/awplayer/tracks", params={"product_id": self.ids[L.url]},
@@ -594,7 +598,7 @@ class CloserAdapter(Adapter):
             L.previews = [{"title": t.get("title") or f"Track {n}", "url": t["url"]}
                           for n, t in enumerate(tracks, 1) if t.get("url")] or None
             L.preview_url = L.previews[0]["url"] if L.previews else None
-        print(f"  closer previews: {min(len(todo), self.MAX_PREVIEW_LOOKUPS)} looked up, {max(0, len(todo) - self.MAX_PREVIEW_LOOKUPS)} left for later runs")
+        print(f"  closer previews: {looked} looked up, {len(todo) - looked} left for later runs")
 
     @staticmethod
     def find_cat(p):
