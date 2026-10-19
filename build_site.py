@@ -6,10 +6,12 @@ Usage:   python build_site.py      then open site.html in your browser.
 Needs scraper.py in the same folder (it reuses its database and exchange rates).
 """
 import json
+import re
 from datetime import date
 from pathlib import Path
 
 import scraper
+from urllib.parse import unquote_plus
 
 AVAILABLE = ("in_stock", "preorder")
 
@@ -22,9 +24,43 @@ def display_name(name):
     return " ".join(words)
 
 
+# Shops add the label's home country to its name ('Altered Circuits Belgium'); that is where the flag comes from.
+COUNTRY_CODES = {
+    "spain": ("es", "Spain"), "us": ("us", "United States"), "usa": ("us", "United States"), "uk": ("gb", "United Kingdom"),
+    "germany": ("de", "Germany"), "netherlands": ("nl", "Netherlands"), "italy": ("it", "Italy"), "portugal": ("pt", "Portugal"),
+    "france": ("fr", "France"), "belgium": ("be", "Belgium"), "sweden": ("se", "Sweden"), "denmark": ("dk", "Denmark"),
+    "norway": ("no", "Norway"), "finland": ("fi", "Finland"), "japan": ("jp", "Japan"), "australia": ("au", "Australia"),
+    "canada": ("ca", "Canada"), "greece": ("gr", "Greece"), "poland": ("pl", "Poland"), "slovenia": ("si", "Slovenia"),
+    "austria": ("at", "Austria"), "switzerland": ("ch", "Switzerland"), "ireland": ("ie", "Ireland"), "russia": ("ru", "Russia"),
+    "uruguay": ("uy", "Uruguay"), "argentina": ("ar", "Argentina"), "brazil": ("br", "Brazil"), "mexico": ("mx", "Mexico"),
+    "croatia": ("hr", "Croatia"), "hungary": ("hu", "Hungary"), "ukraine": ("ua", "Ukraine"), "israel": ("il", "Israel"),
+    "turkey": ("tr", "Turkey"),
+}
+
+
+def label_countries(con):
+    """{label key: (flag code, country name)} from country words on label names and Juno label page addresses."""
+    found = {}
+
+    def look(raw, name):
+        words = re.sub(r"[^\w\s]", " ", raw.lower()).split()
+        if len(words) > 1 and words[-1] in COUNTRY_CODES:
+            found.setdefault(scraper.name_key(name), COUNTRY_CODES[words[-1]])
+
+    for r in con.execute("SELECT name FROM labels"):
+        look(r["name"], r["name"])
+    for r in con.execute("""SELECT lb.name, lp.url FROM label_pages lp JOIN labels lb ON lb.id = lp.label_id
+                            JOIN retailers rt ON rt.id = lp.retailer_id WHERE rt.slug = 'juno'"""):
+        m = re.search(r"/labels/([^/?]+)", r["url"])
+        if m:
+            look(unquote_plus(m.group(1)), r["name"])
+    return found
+
+
 def build():
     rates = scraper.get_rates()
     con = scraper.connect()
+    lcountry = label_countries(con)
     rows = con.execute(
         """SELECT r.id, r.title, COALESCE(lb.name, '') AS label, r.catalogue_no, r.format,
                   r.release_date, r.artwork_url,
@@ -48,6 +84,7 @@ def build():
             "akeys": sorted({"a:" + scraper.simple_key(n) for n in (r["artists"] or "").split("\x1f") if scraper.simple_key(n)} - {"a:various", "a:variousartists"}),
             "anames": [n for n in (r["artists"] or "").split("\x1f") if n], "label": r["label"], "lkey": scraper.name_key(r["label"]),
             "cat": r["catalogue_no"] or "", "format": r["format"] or "",
+            "cc": (lcountry.get(scraper.name_key(r["label"])) or ("", ""))[0], "country": (lcountry.get(scraper.name_key(r["label"])) or ("", ""))[1],
             "date": r["release_date"] or "", "art": r["artwork_url"] or "", "added": "", "offers": [], "genres": [],
         })
         rel["added"] = min(rel["added"] or r["first_seen"], r["first_seen"])
@@ -130,7 +167,7 @@ TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>New from your labels</title>
+<title>Release radar</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
 <style>
@@ -146,6 +183,12 @@ a:focus-visible,button:focus-visible,select:focus-visible{outline:3px solid var(
 header{padding:1.2rem clamp(1rem,4vw,3rem) 1rem}
 .headrow{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem}
 #authBtn{flex:none;white-space:nowrap}
+.hactions{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.hactions a{font:inherit;font-weight:600;padding:.3rem .7rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);text-decoration:none;white-space:nowrap}
+.hactions a[aria-current=page]{background:var(--ink);color:var(--paper)}
+.hactions a:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
+.tabsep{align-self:center;color:var(--dim);font-size:.8rem;user-select:none}
+.flag{width:20px;height:15px;vertical-align:-2px;margin-right:.35rem;border:1px solid var(--rule)}
 .eacts{display:flex;gap:.6rem;flex-wrap:wrap;justify-content:flex-end}
 #entityview{padding:0 clamp(1rem,4vw,3rem) 3rem}
 #entityview .mhead,#entityview .mnote{padding-left:0;padding-right:0}
@@ -287,14 +330,16 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 </head>
 <body>
 <header>
-  <div class="headrow"><h1>New from the labels you follow</h1><button type="button" class="manage" id="authBtn">Sign in</button></div>
+  <div class="headrow"><h1>Release radar</h1>
+    <div class="hactions"><a href="#/wishlist" id="navWishlist">Wishlist</a><a href="#/basket" id="navBasket">Basket</a><button type="button" class="manage" id="authBtn">Sign in</button></div></div>
   <p class="meta" id="meta"></p>
 </header>
-<nav class="site" aria-label="Pages"><a href="#/" id="navHome">New releases</a><a href="#/labels" id="navLabels">Labels</a><a href="#/artists" id="navArtists">Artists</a><a href="#/wishlist" id="navWishlist">Wishlist</a><a href="#/basket" id="navBasket">Basket</a></nav>
+<nav class="site" aria-label="Pages"><a href="#/" id="navHome">Release radar</a><a href="#/labels" id="navLabels">Manage labels</a><a href="#/artists" id="navArtists">Manage artists</a></nav>
 <p class="notice" id="notice" role="status" hidden></p>
 <div id="homeview">
 <div class="bar">
   <div class="tabs" id="tabs"></div>
+  <span class="tabsep" aria-hidden="true">&#9670;</span>
   <div class="tabs" id="srctabs" role="group" aria-label="Releases from"></div>
   <span id="count" aria-live="polite"></span>
   <div class="controls">
@@ -607,7 +652,10 @@ function card(r){
     a.append(by);
   }
   const info = el("p", "info");
-  if (r.label) info.append(entityLink(r.label, "label", r.lkey));
+  if (r.label) {
+    if (r.cc) { const fl = document.createElement("img"); fl.className = "flag"; fl.src = "https://flagcdn.com/20x15/" + r.cc + ".png"; fl.alt = r.country; fl.title = r.country; fl.loading = "lazy"; fl.onerror = () => fl.remove(); info.append(fl); }
+    info.append(entityLink(r.label, "label", r.lkey));
+  }
   const bits = [r.cat, r.format];
   if (r.date) bits.push((r.date > D.generated ? "due " : "released ") + nice(r.date));
   const rest = bits.filter(Boolean).join(", ");
@@ -761,16 +809,16 @@ function render(){
   document.getElementById("count").textContent = list.length + (list.length === 1 ? " release" : " releases");
   const emptyEl = document.getElementById("empty");
   emptyEl.hidden = list.length > 0;
-  emptyEl.textContent = (state.src === "artists" && nFollowed("artists") === 0) ? "You aren't following any artists yet. Open Artists to pick some."
-                      : (state.src === "labels" && nFollowed("labels") === 0) ? "You aren't following any labels yet. Open Labels to pick some."
-                      : followed.size === 0 ? "You aren't following any labels or artists yet. Open Labels or Artists to pick some."
+  emptyEl.textContent = (state.src === "artists" && nFollowed("artists") === 0) ? "You aren't following any artists yet. Open Manage artists to pick some."
+                      : (state.src === "labels" && nFollowed("labels") === 0) ? "You aren't following any labels yet. Open Manage labels to pick some."
+                      : followed.size === 0 ? "You aren't following any labels or artists yet. Open Manage labels or Manage artists to pick some."
                                             : "No releases match. Choose All to see everything.";
 }
 // ---- Manage labels (follow / unfollow) ----
 const mlist = $("mlist");
 let mKind = "labels";
 function saveFollows(){ try { localStorage.setItem(FKEY, JSON.stringify([...followed])); } catch (e) {} }
-function updateManageButton(){ $("navLabels").textContent = "Labels (" + nFollowed("labels") + ")"; $("navArtists").textContent = "Artists (" + nFollowed("artists") + ")"; $("navBasket").textContent = "Basket (" + basket.size + ")"; $("navWishlist").textContent = "Wishlist (" + wish.size + ")"; }
+function updateManageButton(){ $("navLabels").textContent = "Manage labels (" + nFollowed("labels") + ")"; $("navArtists").textContent = "Manage artists (" + nFollowed("artists") + ")"; $("navBasket").textContent = "Basket (" + basket.size + ")"; $("navWishlist").textContent = "Wishlist (" + wish.size + ")"; }
 const nFollowed = kind => [...followed].filter(k => k.startsWith("a:") === (kind === "artists")).length;
 function followChanged(){ saveFollows(); updateManageButton(); buildLabelFilter(); buildGenreFilter(); render(); }
 let mShown = 200;
@@ -876,7 +924,7 @@ function route(){
   if (kind === "entity") { renderEntity(ent[1], decodeURIComponent(ent[2])); window.scrollTo(0, 0); }
   if (kind === "labels" || kind === "artists") {
     if (mKind !== kind) { mKind = kind; $("mq").value = ""; $("mshow").value = "all"; $("mgenre").value = ""; }
-    $("mtitle").textContent = kind === "labels" ? "Labels" : "Artists";
+    $("mtitle").textContent = kind === "labels" ? "Manage labels" : "Manage artists";
     $("mnote").textContent = kind === "labels"
       ? 'Follow a label to put its releases on your home page. Labels marked "full catalogue" are tracked in full; for the others you see what the shops\' new-release pages catch.'
       : "Follow an artist to see their releases on your home page, even from labels you don't follow. Their full catalogue is fetched from each shop every morning.";
