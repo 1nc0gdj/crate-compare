@@ -67,7 +67,7 @@ def build():
                   (SELECT group_concat(a.name, char(31)) FROM release_artists ra
                      JOIN artists a ON a.id = ra.artist_id WHERE ra.release_id = r.id) AS artists,
                   rt.name AS shop, rt.slug AS slug, rt.currency AS ship_cur, rt.ship_first_item AS ship,
-                  li.price, li.currency, li.status, li.url, li.preview_url, li.first_seen, li.previews, li.genres, li.cart_ref, rt.base_url AS base
+                  li.price, li.currency, li.status, li.url, li.preview_url, li.first_seen, li.previews, li.genres, li.cart_ref, rt.base_url AS base, li.id AS lid
            FROM releases r
            LEFT JOIN labels lb ON lb.id = r.label_id
            JOIN listings li ON li.release_id = r.id
@@ -76,6 +76,18 @@ def build():
            ORDER BY r.id"""
     ).fetchall()
 
+    # Back in stock: the latest time a listing went from sold out to available (within the last 21 days)
+    hist = {}
+    for h in con.execute("SELECT listing_id, status, seen_at FROM price_history ORDER BY listing_id, id"):
+        hist.setdefault(h["listing_id"], []).append((h["status"], h["seen_at"]))
+    def back_since(lid):
+        rows, when, prev_out = hist.get(lid, []), None, False
+        for st, at in rows:
+            if st in AVAILABLE and prev_out: when = at[:10]
+            prev_out = st not in AVAILABLE if st != "unknown" else prev_out
+        if when and rows and rows[-1][0] in AVAILABLE and (date.today() - date.fromisoformat(when)).days <= 21:
+            return when
+        return ""
     gcfg, gmap = scraper.load_genre_map()
     releases = {}
     for r in rows:
@@ -100,7 +112,7 @@ def build():
         rel["offers"].append({
             "shop": r["shop"], "status": r["status"], "price": price, "ship": ship,
             "total": total, "url": r["url"], "preview": r["preview_url"] or "",
-            "tracks": json.loads(r["previews"]) if r["previews"] else [],
+            "tracks": json.loads(r["previews"]) if r["previews"] else [], "back": back_since(r["lid"]),
             "cart": (r["base"].rstrip("/") + "/cart/" + r["cart_ref"] + ":1") if r["slug"] == "closer" and r["cart_ref"] else "",
         })
 
@@ -226,6 +238,9 @@ details.multi[open] summary::after{transform:rotate(225deg);margin-top:.2rem}
 .bar .panel label{display:flex;gap:.6rem;padding:.3rem 0;color:var(--ink);cursor:pointer}
 .clearbtn{font:inherit;font-weight:600;color:var(--teal);background:none;border:0;border-top:1px solid var(--rule);width:100%;text-align:left;padding:.55rem 0 .25rem;margin-top:.3rem;cursor:pointer}
 .check input{accent-color:var(--teal);width:1.05rem;height:1.05rem}
+.backtag{position:absolute;left:0;bottom:0;background:#1f7a3d;color:#fff;padding:.25rem .6rem;font-weight:700;font-size:.85rem}
+.backban{border:2px solid #1f7a3d;padding:.7rem 1rem;margin:0 0 1rem}
+.backban li{margin:.3rem 0}
 .newtag{position:absolute;left:0;top:0;background:var(--ink);color:var(--paper);padding:.2rem .6rem;font-weight:700;font-size:.85rem}
 @media (max-width:700px){.bar{position:static}}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:2.4rem 1.6rem;padding:1.8rem clamp(1rem,4vw,3rem) 3rem}
@@ -368,6 +383,7 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 </section>
 <section id="wishview" hidden aria-labelledby="wtitle">
   <div class="mhead"><div><h2 id="wtitle">Wantlist</h2><p class="mcount" id="wsub"></p></div><a class="followbtn backlink" href="#/">Back to releases</a></div>
+  <div class="backban" id="wback" hidden></div>
   <p class="mnote" id="wnote">Records you might buy. They stay here, out of your basket, until you move them across or remove them.</p>
   <main class="grid" id="wgrid"></main>
   <div id="wrecs"></div>
@@ -602,6 +618,13 @@ function matches(r){
   return offs.some(o => o.status === state.view);
 }
 
+const BACKKEY = "crate-compare-back-seen";
+function backOf(r){
+  const o = r.offers.filter(x => x.back && avail(x)).sort((a, b) => b.back.localeCompare(a.back))[0];
+  return o ? {shop: o.shop, date: o.back, url: o.url} : null;
+}
+function backSeen(){ try { return JSON.parse(localStorage.getItem(BACKKEY) || "{}"); } catch (e) { return {}; } }
+function backNew(){ const seen = backSeen(); return D.releases.filter(r => wish.has(r.key)).map(r => [r, backOf(r)]).filter(([r, b]) => b && seen[r.key] !== b.date); }
 function savedButtons(r){
   const box = el("div", "savedacts"), bb = el("button", "basketbtn"), wb = el("button", "basketbtn alt");
   bb.type = wb.type = "button";
@@ -644,6 +667,7 @@ function card(r){
     art.append(img);
   } else art.append(none());
   if (isNew(r)) art.append(el("div", "newtag", "New"));
+  const bk = backOf(r); if (bk && wish.has(r.key)) art.append(el("div", "backtag", "Back in stock at " + bk.shop));
   if (src) {
     const pb = el("button", "playbtn"); pb.type = "button"; pb.innerHTML = ICON.play; pb.setAttribute("aria-label", "Play preview");
     pb.onclick = () => { if (P.rel === r) { audio.paused ? audio.play().catch(() => {}) : audio.pause(); } else startTracks(r, src, 0); };
@@ -826,7 +850,7 @@ function render(){
 const mlist = $("mlist");
 let mKind = "labels";
 function saveFollows(){ try { localStorage.setItem(FKEY, JSON.stringify([...followed])); } catch (e) {} }
-function updateManageButton(){ $("navLabels").textContent = "Manage labels (" + nFollowed("labels") + ")"; $("navArtists").textContent = "Manage artists (" + nFollowed("artists") + ")"; $("navBasket").textContent = "Basket (" + basket.size + ")"; $("navWishlist").textContent = "Wantlist (" + wish.size + ")"; }
+function updateManageButton(){ $("navLabels").textContent = "Manage labels (" + nFollowed("labels") + ")"; $("navArtists").textContent = "Manage artists (" + nFollowed("artists") + ")"; $("navBasket").textContent = "Basket (" + basket.size + ")"; { const nb = backNew().length; $("navWishlist").textContent = "Wantlist (" + wish.size + ")" + (nb ? " · " + nb + " back in stock" : ""); } }
 const nFollowed = kind => [...followed].filter(k => k.startsWith("a:") === (kind === "artists")).length;
 function followChanged(){ saveFollows(); updateManageButton(); buildLabelFilter(); buildGenreFilter(); render(); }
 let mShown = 200;
@@ -1052,6 +1076,15 @@ function renderWishlist(){
   const grid = $("wgrid"); grid.replaceChildren();
   const items = D.releases.filter(r => wish.has(r.key)).sort((a, b) => b.date.localeCompare(a.date));
   $("wsub").textContent = items.length + (items.length === 1 ? " record" : " records") + " on your wantlist";
+  const bn = backNew(), ban = $("wback"); ban.replaceChildren(); ban.hidden = !bn.length;
+  if (bn.length) {
+    ban.append(el("strong", "", "Back in stock"));
+    const ul = el("ul");
+    bn.forEach(([r, b]) => { const li = el("li"); li.append(el("span", "", r.title + " (" + (r.artists || r.label) + ") is available again at " + b.shop + " "), Object.assign(el("a", "shop", "Open"), {href: b.url, target: "_blank", rel: "noopener"})); ul.append(li); });
+    const ok = el("button", "rmbtn", "Got it"); ok.type = "button";
+    ok.onclick = () => { const seen = backSeen(); bn.forEach(([r, b]) => { seen[r.key] = b.date; }); try { localStorage.setItem(BACKKEY, JSON.stringify(seen)); } catch (e) {} updateManageButton(); renderWishlist(); };
+    ban.append(ul, ok);
+  }
   items.forEach(r => grid.append(card(r)));
   if (!items.length) grid.append(el("p", "mnote", "Nothing here yet. Use Save to wantlist on any release."));
   renderRecs($("wrecs"));

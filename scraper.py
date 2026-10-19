@@ -559,7 +559,7 @@ class CloserAdapter(Adapter):
         self.add_previews(out)
         return out
 
-    MAX_PREVIEW_LOOKUPS = 150  # per run (about 5 minutes); records still without previews are picked up on later days
+    MAX_PREVIEW_LOOKUPS = 400  # per run (about 7 minutes); records still without previews are picked up on later days
 
     def __init__(self):
         self.ids = {}            # record address -> Shopify product id
@@ -583,7 +583,7 @@ class CloserAdapter(Adapter):
         todo = [L for L in listings if L.url not in have and self.ids.get(L.url) in self.with_player]
         todo.sort(key=lambda L: L.status == "sold_out")   # records you can buy first (the sort keeps newest-first order within each group)
         for L in todo[:self.MAX_PREVIEW_LOOKUPS]:
-            time.sleep(DELAY_SECONDS)
+            time.sleep(1)       # one small request per record, so a shorter pause than for web pages
             try:
                 r = requests.get(f"{self.BASE}/apps/awplayer/tracks", params={"product_id": self.ids[L.url]},
                                  headers=HEADERS, timeout=30)
