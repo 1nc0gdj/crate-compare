@@ -167,7 +167,7 @@ TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Release radar</title>
+<title>Crate Compare</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
 <style>
@@ -187,6 +187,10 @@ header{padding:1.2rem clamp(1rem,4vw,3rem) 1rem}
 .hactions a{font:inherit;font-weight:600;padding:.3rem .7rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);text-decoration:none;white-space:nowrap}
 .hactions a[aria-current=page]{background:var(--ink);color:var(--paper)}
 .hactions a:focus-visible{outline:3px solid var(--teal);outline-offset:2px}
+.recs{margin-top:2rem}
+.recs h3{margin:0 0 .2rem;font-size:1.3rem}
+.recs .reason{margin:.35rem 0 0;color:var(--dim);font-size:.85rem}
+.recwrap{display:flex;flex-direction:column}
 .tabsep{align-self:center;color:var(--dim);font-size:.8rem;user-select:none}
 .flag{width:20px;height:15px;vertical-align:-2px;margin-right:.35rem;border:1px solid var(--rule)}
 .eacts{display:flex;gap:.6rem;flex-wrap:wrap;justify-content:flex-end}
@@ -330,8 +334,8 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 </head>
 <body>
 <header>
-  <div class="headrow"><h1>Release radar</h1>
-    <div class="hactions"><a href="#/wishlist" id="navWishlist">Wishlist</a><a href="#/basket" id="navBasket">Basket</a><button type="button" class="manage" id="authBtn">Sign in</button></div></div>
+  <div class="headrow"><h1>Crate Compare</h1>
+    <div class="hactions"><a href="#/wantlist" id="navWishlist">Wantlist</a><a href="#/basket" id="navBasket">Basket</a><button type="button" class="manage" id="authBtn">Sign in</button></div></div>
   <p class="meta" id="meta"></p>
 </header>
 <nav class="site" aria-label="Pages"><a href="#/" id="navHome">Release radar</a><a href="#/labels" id="navLabels">Manage labels</a><a href="#/artists" id="navArtists">Manage artists</a></nav>
@@ -355,15 +359,17 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 <p class="empty" id="empty" hidden>No releases match. Choose All to see everything.</p>
 <footer>Totals are the price of one record plus shipping to Sydney, converted to Australian dollars. Shipping per record drops when you buy several from the same shop.</footer>
 </div>
+<section id="relview" hidden aria-label="Release"><p><a href="#/" class="followbtn" id="relback">Back to Release radar</a></p><div id="relhost" class="grid"></div></section>
 <section id="entityview" hidden aria-labelledby="etitle">
   <div class="mhead"><div><h2 id="etitle"></h2><p class="mcount" id="esub"></p></div><div class="eacts"><button type="button" class="followbtn" id="efollow"></button><a class="followbtn backlink" href="#/">Back to releases</a></div></div>
   <p class="mnote" id="elinks"></p>
   <main class="grid" id="egrid"></main>
 </section>
 <section id="wishview" hidden aria-labelledby="wtitle">
-  <div class="mhead"><div><h2 id="wtitle">Wishlist</h2><p class="mcount" id="wsub"></p></div><a class="followbtn backlink" href="#/">Back to releases</a></div>
+  <div class="mhead"><div><h2 id="wtitle">Wantlist</h2><p class="mcount" id="wsub"></p></div><a class="followbtn backlink" href="#/">Back to releases</a></div>
   <p class="mnote" id="wnote">Records you might buy. They stay here, out of your basket, until you move them across or remove them.</p>
   <main class="grid" id="wgrid"></main>
+  <div id="wrecs"></div>
 </section>
 <section id="basketview" hidden aria-labelledby="btitle">
   <div class="mhead"><div><h2 id="btitle">Basket</h2><p class="mcount" id="bsub"></p></div><a class="followbtn backlink" href="#/">Back to releases</a></div>
@@ -602,11 +608,11 @@ function savedButtons(r){
   const paint = () => {
     const inB = basket.has(r.key), inW = wish.has(r.key);
     bb.textContent = inB ? "In basket (remove)" : "Add to basket"; bb.setAttribute("aria-pressed", inB);
-    wb.textContent = inW ? "Saved for later (remove)" : "Save for later"; wb.setAttribute("aria-pressed", inW);
+    wb.textContent = inW ? "On wantlist (remove)" : "Save to wantlist"; wb.setAttribute("aria-pressed", inW);
     bb.hidden = !buyable && !inB;
   };
-  bb.onclick = () => { setSaved(r, "basket", !basket.has(r.key)); paint(); if (location.hash === "#/wishlist") renderWishlist(); };
-  wb.onclick = () => { setSaved(r, "wishlist", !wish.has(r.key)); paint(); if (location.hash === "#/wishlist") renderWishlist(); };
+  bb.onclick = () => { setSaved(r, "basket", !basket.has(r.key)); paint(); if (location.hash === "#/wantlist") renderWishlist(); if (location.hash === "#/basket") renderBasket(); };
+  wb.onclick = () => { setSaved(r, "wishlist", !wish.has(r.key)); paint(); if (location.hash === "#/wantlist") renderWishlist(); if (location.hash === "#/basket") renderBasket(); };
   paint(); box.append(bb, wb);
   return box;
 }
@@ -712,6 +718,7 @@ function startTracks(r, offer, index){
   P.queue = offer.tracks; P.i = index; P.rel = r; P.offer = offer; P.errors = 0;
   loadTrack();
 }
+function goToPlaying(){ if (P.rel) location.hash = "#/release/" + encodeURIComponent(P.rel.id); }
 function loadTrack(){
   const t = P.queue[P.i];
   audio.src = t.url; applyTempo();
@@ -719,7 +726,7 @@ function loadTrack(){
   bar.hidden = false; document.body.classList.add("has-player");
   $("ptrack").textContent = t.title;
   $("psub").textContent = [P.rel.artists, P.rel.title].filter(Boolean).join(", ") + ". Preview from " + P.offer.shop;
-  const img = $("pimg"); img.hidden = !safe(P.rel.art); if (safe(P.rel.art)) loadArt(img, artCandidates(P.rel.art), () => { img.hidden = true; });
+  const img = $("pimg"); img.style.cursor = "pointer"; img.title = "Go to this release"; img.onclick = goToPlaying; img.hidden = !safe(P.rel.art); if (safe(P.rel.art)) loadArt(img, artCandidates(P.rel.art), () => { img.hidden = true; });
   markPlaying();
   try {
     if ("mediaSession" in navigator) {
@@ -818,7 +825,7 @@ function render(){
 const mlist = $("mlist");
 let mKind = "labels";
 function saveFollows(){ try { localStorage.setItem(FKEY, JSON.stringify([...followed])); } catch (e) {} }
-function updateManageButton(){ $("navLabels").textContent = "Manage labels (" + nFollowed("labels") + ")"; $("navArtists").textContent = "Manage artists (" + nFollowed("artists") + ")"; $("navBasket").textContent = "Basket (" + basket.size + ")"; $("navWishlist").textContent = "Wishlist (" + wish.size + ")"; }
+function updateManageButton(){ $("navLabels").textContent = "Manage labels (" + nFollowed("labels") + ")"; $("navArtists").textContent = "Manage artists (" + nFollowed("artists") + ")"; $("navBasket").textContent = "Basket (" + basket.size + ")"; $("navWishlist").textContent = "Wantlist (" + wish.size + ")"; }
 const nFollowed = kind => [...followed].filter(k => k.startsWith("a:") === (kind === "artists")).length;
 function followChanged(){ saveFollows(); updateManageButton(); buildLabelFilter(); buildGenreFilter(); render(); }
 let mShown = 200;
@@ -913,12 +920,18 @@ function fillGenreSelect(){
   [["", "Any genre"], ...order.map(g => [g, g])].forEach(([v, t]) => { const o = el("option", "", t); o.value = v; sel.append(o); });
 }
 function route(){
-  const ent = location.hash.match(/^#\/(label|artist)\/(.+)$/);
-  const h = location.hash, kind = ent ? "entity" : h === "#/labels" ? "labels" : h === "#/artists" ? "artists" : h === "#/basket" ? "basket" : h === "#/wishlist" ? "wishlist" : "home";
-  $("homeview").hidden = kind !== "home"; $("manageview").hidden = kind !== "labels" && kind !== "artists"; $("basketview").hidden = kind !== "basket"; $("wishview").hidden = kind !== "wishlist"; $("entityview").hidden = kind !== "entity";
+  const ent = location.hash.match(/^#\/(label|artist)\/(.+)$/), rel = location.hash.match(/^#\/release\/(.+)$/);
+  const h = location.hash, kind = ent ? "entity" : rel ? "release" : h === "#/labels" ? "labels" : h === "#/artists" ? "artists" : h === "#/basket" ? "basket" : (h === "#/wantlist" || h === "#/wishlist") ? "wishlist" : "home";
+  $("homeview").hidden = kind !== "home"; $("manageview").hidden = kind !== "labels" && kind !== "artists"; $("basketview").hidden = kind !== "basket"; $("wishview").hidden = kind !== "wishlist"; $("entityview").hidden = kind !== "entity"; $("relview").hidden = kind !== "release";
   [["navHome", "home"], ["navLabels", "labels"], ["navArtists", "artists"], ["navBasket", "basket"], ["navWishlist", "wishlist"]].forEach(([id, k]) => {
     if (k === kind) $(id).setAttribute("aria-current", "page"); else $(id).removeAttribute("aria-current");
   });
+  if (kind === "release") {
+    const host = $("relhost"); host.replaceChildren();
+    const r = D.releases.find(x => String(x.id) === decodeURIComponent(rel[1]));
+    if (r) { host.append(card(r)); markPlaying(); } else host.append(el("p", "mnote", "That release isn't in the list any more."));
+    window.scrollTo(0, 0);
+  }
   if (kind === "basket") { renderBasket(); window.scrollTo(0, 0); }
   if (kind === "wishlist") { renderWishlist(); window.scrollTo(0, 0); }
   if (kind === "entity") { renderEntity(ent[1], decodeURIComponent(ent[2])); window.scrollTo(0, 0); }
@@ -992,19 +1005,63 @@ function renderEntity(type, key){
   rels.slice(0, 300).forEach(r => grid.append(card(r)));
   if (!rels.length) grid.append(el("p", "mnote", "No releases found yet."));
 }
+// ---- More like this: picks based on what's in your basket and wantlist (shown only on those two pages) ----
+function recommend(n = 8){
+  const seeds = D.releases.filter(r => basket.has(r.key) || wish.has(r.key));
+  if (!seeds.length) return [];
+  const taken = new Set([...basket, ...wish]), sk = new Map(), sl = new Map(), sg = new Map();
+  seeds.forEach(r => {
+    r.akeys.forEach(k => { if (!sk.has(k)) sk.set(k, r); });
+    if (!sl.has(r.lkey)) sl.set(r.lkey, r);
+    r.genres.forEach(g => sg.set(g, (sg.get(g) || 0) + 1));
+  });
+  const today = new Date().toISOString().slice(0, 10), cutoff = new Date(Date.now() - 120 * 864e5).toISOString().slice(0, 10);
+  const scored = [];
+  D.releases.forEach(r => {
+    if (taken.has(r.key) || !r.offers.some(avail)) return;
+    let score = 0; const why = [];
+    const artistHit = r.akeys.find(k => sk.has(k));
+    if (artistHit) { score += 6; const nm = (r.anames.find(a => a[1] === artistHit) || [artistHit.slice(2)])[0]; why.push("More from " + nm); }
+    if (sl.has(r.lkey)) { score += 4; why.push("Same label as " + sl.get(r.lkey).title); }
+    const gs = r.genres.filter(g => sg.has(g));
+    if (gs.length) { score += Math.min(gs.length, 3) * 1.5; if (!why.length) why.push("Also " + gs.slice(0, 2).join(" / ")); }
+    if (isFollowedRel(r)) { score += 1; if (!why.length) why.push("From a label or artist you follow"); }
+    if (r.date && r.date >= cutoff) score += 0.5;
+    if (score >= 3 && why.length) scored.push({r, score, why: why[0]});
+  });
+  scored.sort((a, b) => b.score - a.score || b.r.date.localeCompare(a.r.date));
+  const perLabel = {}, out = [];
+  for (const s of scored) {                                           // no more than two from any one label
+    perLabel[s.r.lkey] = (perLabel[s.r.lkey] || 0) + 1;
+    if (perLabel[s.r.lkey] <= 2) out.push(s);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+function renderRecs(host){
+  const picks = recommend();
+  host.replaceChildren();
+  if (!picks.length) return;
+  const sec = el("section", "recs"), grid = el("div", "grid");
+  sec.append(el("h3", "", "More like this"), el("p", "mmeta", "Picks based on what's in your basket and wantlist."));
+  picks.forEach(({r, why}) => { const c = card(r); c.append(el("p", "reason", why)); grid.append(c); });
+  sec.append(grid); host.append(sec);
+}
 function renderWishlist(){
   const grid = $("wgrid"); grid.replaceChildren();
   const items = D.releases.filter(r => wish.has(r.key)).sort((a, b) => b.date.localeCompare(a.date));
-  $("wsub").textContent = items.length + (items.length === 1 ? " record" : " records") + " saved for later";
+  $("wsub").textContent = items.length + (items.length === 1 ? " record" : " records") + " on your wantlist";
   items.forEach(r => grid.append(card(r)));
-  if (!items.length) grid.append(el("p", "mnote", "Nothing saved yet. Use Save for later on any release."));
+  if (!items.length) grid.append(el("p", "mnote", "Nothing here yet. Use Save to wantlist on any release."));
+  renderRecs($("wrecs"));
 }
 function renderBasket(){
   const body = $("bbody"); body.replaceChildren();
   const items = D.releases.filter(r => basket.has(r.key));
   $("bsub").textContent = items.length + (items.length === 1 ? " record" : " records") + " in your basket";
   if (!items.length) {
-    body.append(el("p", "mnote", "Your basket is empty. Use Add to basket on any release (or move one over from your wishlist) and this page works out the cheapest way to buy them, shipping included."));
+    body.append(el("p", "mnote", "Your basket is empty. Use Add to basket on any release (or move one over from your wantlist) and this page works out the cheapest way to buy them, shipping included."));
+    const rh = el("div"); body.append(rh); renderRecs(rh);
     return;
   }
   const plan = planBasket(items), byShop = {};
@@ -1027,11 +1084,15 @@ function renderBasket(){
     const ul = el("ul");
     idxs.forEach(i => {
       const r = items[i], o = plan.opts[i][s], li = el("li"), left = el("div"), right = el("div");
-      left.append(el("span", "bt", r.title), el("span", "bm", [r.artists, r.label, r.cat].filter(Boolean).join(", ") + (o.status === "preorder" ? " · pre-order" : "")));
+      const tb = el("button", "rmbtn", "Play preview"); tb.type = "button";
+      const tsrc = source(r);
+      if (tsrc) tb.onclick = () => { if (P.rel === r) { audio.paused ? audio.play().catch(() => {}) : audio.pause(); } else startTracks(r, tsrc, 0); }; else { tb.disabled = true; tb.textContent = "No preview"; }
+      const tl = el("a", "bt", r.title); tl.href = "#/release/" + encodeURIComponent(r.id); tl.style.color = "inherit";
+      left.append(tl, el("span", "bm", [r.artists, r.label, r.cat].filter(Boolean).join(", ") + (o.status === "preorder" ? " · pre-order" : "")), tb);
       const rm = el("button", "rmbtn", "Remove"); rm.type = "button";
       rm.onclick = () => { setSaved(r, "basket", false); renderBasket(); render(); };
-      const later = el("button", "rmbtn", wish.has(r.key) ? "On wishlist" : "Save for later"); later.disabled = wish.has(r.key); later.type = "button";
-      later.onclick = () => { setSaved(r, "wishlist", true); later.textContent = "On wishlist"; later.disabled = true; render(); };
+      const later = el("button", "rmbtn", wish.has(r.key) ? "On wantlist" : "Save to wantlist"); later.disabled = wish.has(r.key); later.type = "button";
+      later.onclick = () => { setSaved(r, "wishlist", true); later.textContent = "On wantlist"; later.disabled = true; render(); };
       right.append(safe(o.url) ? Object.assign(el("a", "shop", money(o.price)), {href: o.url, target: "_blank", rel: "noopener"}) : el("span", "", money(o.price)), document.createTextNode(" "), later, document.createTextNode(" "), rm);
       li.append(left, right); ul.append(li);
     });
@@ -1057,7 +1118,8 @@ function renderBasket(){
   };
   clear.onclick = () => { [...basket].forEach(k => { basket.delete(k); pushSaved(k, "", "basket", false); }); saveSaved(); updateManageButton(); renderBasket(); render(); };
   act.append(copy, clear); body.append(act);
-  body.append(el("p", "mmeta", "Shipping is estimated from each shop's rates to Sydney. Pre-orders often ship on release day, so they can arrive separately. Check each shop's cart before paying. Your basket and wishlist are saved to your account when you are signed in, and on this device."));
+  body.append(el("p", "mmeta", "Shipping is estimated from each shop's rates to Sydney. Pre-orders often ship on release day, so they can arrive separately. Check each shop's cart before paying. Your basket and wantlist are saved to your account when you are signed in, and on this device."));
+  const rh = el("div"); body.append(rh); renderRecs(rh);
 }
 window.addEventListener("hashchange", route);
 $("mq").oninput = () => renderManage(); ["msort", "mshow", "mmin", "mgenre"].forEach(id => { $(id).onchange = () => renderManage(); });
@@ -1144,8 +1206,8 @@ async function syncSaved(){
     }
     updateManageButton(); render();
     if (location.hash === "#/basket") renderBasket();
-    if (location.hash === "#/wishlist") renderWishlist();
-  } catch (err) { if (session) notice("Couldn't sync your basket and wishlist: " + err.message); }
+    if (location.hash === "#/wantlist") renderWishlist(); if (location.hash === "#/basket") renderBasket();
+  } catch (err) { if (session) notice("Couldn't sync your basket and wantlist: " + err.message); }
 }
 async function syncFollows(){
   if (!SB || !session) return;

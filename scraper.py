@@ -1043,7 +1043,8 @@ def expand_feed(slug):
     return [page_url(slug, base, n) for base in cfg.get("urls", []) for n in range(1, int(cfg.get("pages", 1)) + 1)]
 
 
-SHOP_BUDGET_SECONDS = 11 * 60  # most time one shop may spend on extra label/artist pages; whatever is done by then is saved
+FULL_PAGE = 20   # a page with at least this many records may continue on a next page
+SHOP_BUDGET_SECONDS = 14 * 60  # most time one shop may spend on extra label/artist pages; whatever is done by then is saved
 
 
 def run(slug):
@@ -1087,16 +1088,25 @@ def run(slug):
     if label_pages:                         # start somewhere different each day so pages skipped for time get their turn
         k = date.today().toordinal() % len(label_pages)
         label_pages = label_pages[k:] + label_pages[:k]
-    out_of_time = False
-    for i, base in enumerate(label_pages):  # full catalogue of labels people follow, page by page
+    # Pass 1: the first page of every followed label/artist, so nothing is skipped just because the run was slow.
+    # Pass 2: further pages, only for pages that came back full.
+    out_of_time, full_pages = False, []
+    for i, base in enumerate(label_pages):
         if time.time() - started > SHOP_BUDGET_SECONDS:
             print(f"  {slug}: time budget used up; skipping the remaining {len(label_pages) - i} label/artist pages until tomorrow's run")
             out_of_time = True
             break
-        for n in range(1, MAX_LABEL_PAGES + 1):
+        results = adapter.scrape([base])
+        if len(results) >= FULL_PAGE:
+            full_pages.append(base)
+        fresh = [L for L in results if L.url not in have]
+        have.update(L.url for L in fresh)
+        scraped += fresh
+    for base in full_pages:
+        for n in range(2, MAX_LABEL_PAGES + 1):
             if time.time() - started > SHOP_BUDGET_SECONDS:
                 break
-            if n > 1 and page_url(slug, base, n) == base:     # this shop's paging isn't known here: don't fetch page 1 twice
+            if page_url(slug, base, n) == base:     # this shop's paging isn't known here: don't fetch page 1 twice
                 break
             fresh = [L for L in adapter.scrape([page_url(slug, base, n)]) if L.url not in have]
             if not fresh:
