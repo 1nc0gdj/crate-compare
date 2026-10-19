@@ -558,7 +558,7 @@ class CloserAdapter(Adapter):
         self.add_previews(out)
         return out
 
-    MAX_PREVIEW_LOOKUPS = 60   # per run; records still without previews are picked up on later days
+    MAX_PREVIEW_LOOKUPS = 150  # per run (about 5 minutes); records still without previews are picked up on later days
 
     def __init__(self):
         self.ids = {}            # record address -> Shopify product id
@@ -580,6 +580,7 @@ class CloserAdapter(Adapter):
             print(f"  closer previews: skipped ({e})")
             return
         todo = [L for L in listings if L.url not in have and self.ids.get(L.url) in self.with_player]
+        todo.sort(key=lambda L: L.status == "sold_out")   # records you can buy first (the sort keeps newest-first order within each group)
         for L in todo[:self.MAX_PREVIEW_LOOKUPS]:
             time.sleep(DELAY_SECONDS)
             try:
