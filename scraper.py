@@ -941,7 +941,7 @@ def labels_without_page(slug, keys, manual_urls):
     return list(names.values())
 
 
-SEARCH_URLS = {"juno": "https://www.juno.co.uk/search/?q%5Ball%5D%5B%5D={q}&solrorder=relevancy",
+SEARCH_URLS = {"juno": "https://www.juno.co.uk/search/?q%5Ball%5D%5B%5D={q}&solrorder=relevancy&show_out_of_stock=1",
                "yoyaku": "https://yoyaku.io/?s={q}&post_type=product"}
 MAX_DISCOVER = 12    # label searches per shop per run
 
