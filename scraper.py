@@ -45,6 +45,7 @@ class Listing:
     label_url: str | None = None      # the label's own page at this shop
     genres: list | None = None        # the shop's own genre labels, exactly as written there
     artist_urls: dict | None = None   # {artist name: that artist's own page at this shop}
+    cart_ref: str | None = None       # what the shop's add-to-cart link needs (Closer: the Shopify variant id)
 
 
 def norm_cat(cat: str | None) -> str | None:
@@ -655,6 +656,7 @@ class CloserAdapter(Adapter):
             artwork_url=imgs[0].get("src") if imgs else None,
             release_date=(p.get("published_at") or "")[:10] or None,   # when the shop listed it
             genres=[t for t in tags if not re.search(r"pre-?order|new|sale|vinyl", t, re.I)] or None,
+            cart_ref=str(v["id"]) if v.get("id") else None,
         )
 
 
@@ -701,7 +703,7 @@ def init_db():
     con = connect()
     con.executescript(Path("schema.sql").read_text())
     have = [r["name"] for r in con.execute("PRAGMA table_info(listings)")]
-    for col in ("previews", "genres"):
+    for col in ("previews", "genres", "cart_ref"):
         if col not in have:
             con.execute(f"ALTER TABLE listings ADD COLUMN {col} TEXT")   # older databases
     con.execute(
@@ -821,15 +823,15 @@ def upsert(con, L: Listing):
 
     # 2) Upsert this retailer's listing.
     con.execute(
-        """INSERT INTO listings (release_id, retailer_id, url, price, currency, status, preview_url, previews, genres)
-           VALUES (?,?,?,?,?,?,?,?,?)
+        """INSERT INTO listings (release_id, retailer_id, url, price, currency, status, preview_url, previews, genres, cart_ref)
+           VALUES (?,?,?,?,?,?,?,?,?,?)
            ON CONFLICT(release_id, retailer_id) DO UPDATE SET
              url=excluded.url, price=excluded.price, currency=excluded.currency,
              status=excluded.status, preview_url=excluded.preview_url,
-             previews=COALESCE(excluded.previews, previews), genres=COALESCE(excluded.genres, genres),
+             previews=COALESCE(excluded.previews, previews), genres=COALESCE(excluded.genres, genres), cart_ref=COALESCE(excluded.cart_ref, cart_ref),
              last_seen=datetime('now')""",
         (release_id, retailer_id, L.url, L.price, L.currency, L.status, L.preview_url,
-         json.dumps(L.previews) if L.previews else None, json.dumps(L.genres) if L.genres else None),
+         json.dumps(L.previews) if L.previews else None, json.dumps(L.genres) if L.genres else None, L.cart_ref),
     )
     listing_id = con.execute(
         "SELECT id FROM listings WHERE release_id=? AND retailer_id=?",

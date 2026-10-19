@@ -67,7 +67,7 @@ def build():
                   (SELECT group_concat(a.name, char(31)) FROM release_artists ra
                      JOIN artists a ON a.id = ra.artist_id WHERE ra.release_id = r.id) AS artists,
                   rt.name AS shop, rt.slug AS slug, rt.currency AS ship_cur, rt.ship_first_item AS ship,
-                  li.price, li.currency, li.status, li.url, li.preview_url, li.first_seen, li.previews, li.genres
+                  li.price, li.currency, li.status, li.url, li.preview_url, li.first_seen, li.previews, li.genres, li.cart_ref, rt.base_url AS base
            FROM releases r
            LEFT JOIN labels lb ON lb.id = r.label_id
            JOIN listings li ON li.release_id = r.id
@@ -101,6 +101,7 @@ def build():
             "shop": r["shop"], "status": r["status"], "price": price, "ship": ship,
             "total": total, "url": r["url"], "preview": r["preview_url"] or "",
             "tracks": json.loads(r["previews"]) if r["previews"] else [],
+            "cart": (r["base"].rstrip("/") + "/cart/" + r["cart_ref"] + ":1") if r["slug"] == "closer" and r["cart_ref"] else "",
         })
 
     out = []
@@ -1096,8 +1097,17 @@ function renderBasket(){
       right.append(safe(o.url) ? Object.assign(el("a", "shop", money(o.price)), {href: o.url, target: "_blank", rel: "noopener"}) : el("span", "", money(o.price)), document.createTextNode(" "), later, document.createTextNode(" "), rm);
       li.append(left, right); ul.append(li);
     });
+    let cartP = null;
+    const carts = idxs.map(i => plan.opts[i][s].cart).filter(Boolean);
+    if (carts.length === idxs.length && carts.length) {
+      const base = carts[0].split("/cart/")[0];
+      const go = el("a", "followbtn", "Open " + s + " with these " + carts.length + (carts.length === 1 ? " record" : " records") + " in the cart");
+      go.href = base + "/cart/" + carts.map(c => c.split("/cart/")[1]).join(","); go.target = "_blank"; go.rel = "noopener";
+      const gp = el("p"); gp.append(go, el("span", "mmeta", " Opens " + s + " in a new tab. You check out and pay there."));
+      cartP = gp;
+    }
     const foot = el("div", "bfoot"); foot.append(el("span", "", "Shipping to Sydney"), el("span", "", money(ship)));
-    box.append(h, ul, foot); body.append(box);
+    box.append(h, ul, foot); if (cartP) box.append(cartP); body.append(box);
   });
   if (plan.missing.length) {
     const box = el("section", "bshop"), h = el("h3"); h.append(el("span", "", "Not available right now"), el("span", "", String(plan.missing.length)));
