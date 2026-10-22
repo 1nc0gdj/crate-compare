@@ -181,6 +181,7 @@ TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>try{var t=localStorage.getItem("crate-compare-theme");if(!t)t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t}catch(e){}</script>
 <title>Crate Compare</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
@@ -190,6 +191,11 @@ TEMPLATE = r"""<!doctype html>
   --sticker:#F2B01E; --teal:#16695C; --rule:#B8C4C1;
   --font:"Archivo",system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 }
+:root[data-theme=dark]{--fog:#0E181C; --ink:#E6ECEA; --paper:#17252B; --dim:#9DB0B3; --teal:#5CC7AC; --rule:#2F434A; color-scheme:dark}
+:root[data-theme=dark] .pre{color:#E0A84A}
+:root[data-theme=dark] .art img{opacity:.92}
+.sticker,.notice{color:#15262C}
+.themebtn{font:inherit;font-weight:600;padding:.3rem .7rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;white-space:nowrap}
 *{box-sizing:border-box}
 body{margin:0;background:var(--fog);color:var(--ink);font-family:var(--font);line-height:1.4}
 a{color:inherit}
@@ -352,7 +358,7 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 <body>
 <header>
   <div class="headrow"><h1>Crate Compare</h1>
-    <div class="hactions"><a href="#/wantlist" id="navWishlist">Wantlist</a><a href="#/basket" id="navBasket">Basket</a><button type="button" class="manage" id="authBtn">Sign in</button></div></div>
+    <div class="hactions"><a href="#/wantlist" id="navWishlist">Wantlist</a><a href="#/basket" id="navBasket">Basket</a><button type="button" class="themebtn" id="themeBtn" aria-label="Switch between light and dark mode">Dark mode</button><button type="button" class="manage" id="authBtn">Sign in</button></div></div>
   <p class="meta" id="meta"></p>
 </header>
 <nav class="site" aria-label="Pages"><a href="#/" id="navHome">Release radar</a><a href="#/labels" id="navLabels">Manage labels</a><a href="#/artists" id="navArtists">Manage artists</a></nav>
@@ -468,6 +474,10 @@ try {
 } catch (e) {}
 const isNew = r => since != null && r.addedMs > since;
 // The labels you follow decide what's on the home page. Saved in this browser; the first visit starts with the defaults.
+const THEMEKEY = "crate-compare-theme";
+function paintTheme(){ const dark = document.documentElement.dataset.theme === "dark"; document.getElementById("themeBtn").textContent = dark ? "Light mode" : "Dark mode"; }
+document.getElementById("themeBtn").onclick = () => { const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = next; try { localStorage.setItem(THEMEKEY, next); } catch (e) {} paintTheme(); };
+paintTheme();
 const FKEY = "crate-compare-follows";
 let followed = new Set(D.defaults);
 try { const saved = localStorage.getItem(FKEY); if (saved) followed = new Set(JSON.parse(saved)); } catch (e) {}
@@ -1133,15 +1143,18 @@ function renderBasket(){
     });
     let cartP = null;
     const carts = idxs.map(i => plan.opts[i][s].cart).filter(Boolean);
-    if (carts.length === idxs.length && carts.length) {
+    const noCart = idxs.filter(i => !plan.opts[i][s].cart && !plan.opts[i][s].cartid);
+    const noCartNote = () => { if (!noCart.length || !(carts.length || yidsCount)) return null; const p = el("p", "mmeta", "No cart link for: "); noCart.forEach(i => { const o = plan.opts[i][s]; p.append(safe(o.url) ? Object.assign(el("a", "shop", items[i].title), {href: o.url, target: "_blank", rel: "noopener"}) : document.createTextNode(items[i].title), document.createTextNode("  ")); }); return p; };
+    const yidsCount = idxs.filter(i => plan.opts[i][s].cartid).length;
+    if (carts.length) {
       const base = carts[0].split("/cart/")[0];
-      const go = el("a", "followbtn", "Open " + s + " with these " + carts.length + (carts.length === 1 ? " record" : " records") + " in the cart");
+      const go = el("a", "followbtn", "Open " + s + " with " + (carts.length === idxs.length ? "these " : "") + carts.length + (carts.length === 1 ? " record" : " records") + " in the cart");
       go.href = base + "/cart/" + carts.map(c => c.split("/cart/")[1]).join(","); go.target = "_blank"; go.rel = "noopener";
       const gp = el("p"); gp.append(go, el("span", "mmeta", " Opens " + s + " in a new tab. You check out and pay there."));
       cartP = gp;
     }
     const yids = idxs.map(i => plan.opts[i][s]).filter(o => o.cartid);
-    if (yids.length === idxs.length && yids.length) {
+    if (yids.length) {
       const base = yids[0].base, status = el("span", "mmeta");
       const addUrl = o => base + "/?add-to-cart=" + o.cartid;
       const go = el("button", "followbtn", "Add these " + yids.length + (yids.length === 1 ? " record" : " records") + " to the " + s + " cart"); go.type = "button";
@@ -1153,19 +1166,19 @@ function renderBasket(){
         const next = () => {
           if (w.closed) { status.textContent = " The " + s + " tab was closed before it finished. Use the Add links below."; go.disabled = false; return; }
           try {
-            if (n < yids.length) { w.location = addUrl(yids[n]); n++; status.textContent = " Adding record " + n + " of " + yids.length + "\u2026 keep this page open."; setTimeout(next, 3500); }
+            if (n < yids.length) { w.location = addUrl(yids[n]); n++; status.textContent = " Adding record " + n + " of " + yids.length + "\u2026 keep this page open."; setTimeout(next, 5000); }
             else { w.location = base + "/cart/"; status.textContent = " Done. Check the " + s + " cart tab, then check out and pay there."; go.disabled = false; }
           } catch (e) { status.textContent = " Couldn't drive the " + s + " tab. Use the Add links next to each record."; go.disabled = false; }
         };
-        setTimeout(next, 3500);
+        status.textContent = " Opening " + s + " (this first step waits for its security check)\u2026 keep this page open."; setTimeout(next, 12000);
       };
       const gp = el("p"); gp.append(go, status);
       const links = el("p", "mmeta", "Or add one at a time: ");
-      idxs.forEach((i, k) => { const o = plan.opts[i][s]; links.append(Object.assign(el("a", "shop", (k + 1) + ". " + items[i].title.slice(0, 28)), {href: addUrl(o), target: "_blank", rel: "noopener"}), document.createTextNode("  ")); });
+      idxs.filter(i => plan.opts[i][s].cartid).forEach((i, k) => { const o = plan.opts[i][s]; links.append(Object.assign(el("a", "shop", (k + 1) + ". " + items[i].title.slice(0, 28)), {href: addUrl(o), target: "_blank", rel: "noopener"}), document.createTextNode("  ")); });
       cartP = el("div"); cartP.append(gp, links);
     }
     const foot = el("div", "bfoot"); foot.append(el("span", "", "Shipping to Sydney"), el("span", "", money(ship)));
-    box.append(h, ul, foot); if (cartP) box.append(cartP); body.append(box);
+    box.append(h, ul, foot); if (cartP) box.append(cartP); { const nn = noCartNote(); if (nn) box.append(nn); } body.append(box);
   });
   if (plan.missing.length) {
     const box = el("section", "bshop"), h = el("h3"); h.append(el("span", "", "Not available right now"), el("span", "", String(plan.missing.length)));

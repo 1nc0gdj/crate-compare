@@ -430,6 +430,11 @@ class YoyakuAdapter(Adapter):
         except requests.RequestException as e:
             print(f"    could not open {item.url} ({e}); keeping the listing's status")
             return
+        if not item.cart_ref:                # pre-orders and others whose card had no add-to-cart link: the page knows its own number
+            body = soup.find("body")
+            m = re.search(r"\bpostid-(\d+)", " ".join(body.get("class", [])) if body else "")
+            if m:
+                item.cart_ref = m.group(1)
         play = soup.select_one("a.fwap-play[data-product]")
         if play:
             try:
