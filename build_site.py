@@ -114,6 +114,7 @@ def build():
             "total": total, "url": r["url"], "preview": r["preview_url"] or "",
             "tracks": json.loads(r["previews"]) if r["previews"] else [], "back": back_since(r["lid"]),
             "cart": (r["base"].rstrip("/") + "/cart/" + r["cart_ref"] + ":1") if r["slug"] == "closer" and r["cart_ref"] else "",
+            "cartid": r["cart_ref"] if r["slug"] == "yoyaku" and r["cart_ref"] else "", "base": r["base"].rstrip("/"),
         })
 
     out = []
@@ -1138,6 +1139,30 @@ function renderBasket(){
       go.href = base + "/cart/" + carts.map(c => c.split("/cart/")[1]).join(","); go.target = "_blank"; go.rel = "noopener";
       const gp = el("p"); gp.append(go, el("span", "mmeta", " Opens " + s + " in a new tab. You check out and pay there."));
       cartP = gp;
+    }
+    const yids = idxs.map(i => plan.opts[i][s]).filter(o => o.cartid);
+    if (yids.length === idxs.length && yids.length) {
+      const base = yids[0].base, status = el("span", "mmeta");
+      const addUrl = o => base + "/?add-to-cart=" + o.cartid;
+      const go = el("button", "followbtn", "Add these " + yids.length + (yids.length === 1 ? " record" : " records") + " to the " + s + " cart"); go.type = "button";
+      go.onclick = () => {
+        const w = window.open(addUrl(yids[0]), "_blank");
+        if (!w) { status.textContent = " Your browser blocked the new tab. Allow pop-ups for this site, or use the Add links next to each record."; return; }
+        if (yids.length === 1) { setTimeout(() => { try { w.location = base + "/cart/"; } catch (e) {} }, 3500); status.textContent = " Opened " + s + ". You check out and pay there."; return; }
+        let n = 1; go.disabled = true;
+        const next = () => {
+          if (w.closed) { status.textContent = " The " + s + " tab was closed before it finished. Use the Add links below."; go.disabled = false; return; }
+          try {
+            if (n < yids.length) { w.location = addUrl(yids[n]); n++; status.textContent = " Adding record " + n + " of " + yids.length + "\u2026 keep this page open."; setTimeout(next, 3500); }
+            else { w.location = base + "/cart/"; status.textContent = " Done. Check the " + s + " cart tab, then check out and pay there."; go.disabled = false; }
+          } catch (e) { status.textContent = " Couldn't drive the " + s + " tab. Use the Add links next to each record."; go.disabled = false; }
+        };
+        setTimeout(next, 3500);
+      };
+      const gp = el("p"); gp.append(go, status);
+      const links = el("p", "mmeta", "Or add one at a time: ");
+      idxs.forEach((i, k) => { const o = plan.opts[i][s]; links.append(Object.assign(el("a", "shop", (k + 1) + ". " + items[i].title.slice(0, 28)), {href: addUrl(o), target: "_blank", rel: "noopener"}), document.createTextNode("  ")); });
+      cartP = el("div"); cartP.append(gp, links);
     }
     const foot = el("div", "bfoot"); foot.append(el("span", "", "Shipping to Sydney"), el("span", "", money(ship)));
     box.append(h, ul, foot); if (cartP) box.append(cartP); body.append(box);

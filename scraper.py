@@ -518,6 +518,15 @@ class YoyakuAdapter(Adapter):
         img = node.select_one("img")
         art = (img.get("src") or img.get("data-src")) if img else None
         url = urljoin(self.BASE, href)
+        cart_id = None                       # the number in Yoyaku's add-to-cart link
+        for a in node.select('a[href*="add-to-cart="]'):
+            m = re.search(r"add-to-cart=(\d+)", a.get("href", ""))
+            if m:
+                cart_id = m.group(1)
+                break
+        if not cart_id:
+            tag = node.select_one("[data-product_id]")
+            cart_id = tag["data-product_id"] if tag and str(tag.get("data-product_id", "")).isdigit() else None
         return Listing(
             retailer_slug=self.slug, title=title, artists=artists, label=label,
             catalogue_no=norm_cat(cat), format=fmt, price=price, currency="EUR",
@@ -525,6 +534,7 @@ class YoyakuAdapter(Adapter):
             label_url=urljoin(self.BASE, label_el["href"]), genres=styles or None,
             artist_urls={a.get_text(strip=True): urljoin(self.BASE, a["href"])
                          for a in node.select('a[href*="/artist/"]') if a.get_text(strip=True)} or None,
+            cart_ref=cart_id,
         )
 
 
