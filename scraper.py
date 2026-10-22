@@ -8,6 +8,8 @@ Usage:
 The Juno adapter reads link addresses and text patterns from the page.
 """
 import json
+import os
+import zlib
 import re
 import sqlite3
 import sys
@@ -697,7 +699,7 @@ SHIPPING = {
 # ---------- DB helpers ----------
 def connect():
     _KEYS.clear()
-    con = sqlite3.connect(DB_PATH)
+    con = sqlite3.connect(DB_PATH, timeout=180)   # shops run side by side; wait for another shop's save instead of failing
     con.execute("PRAGMA foreign_keys = ON")
     con.row_factory = sqlite3.Row
     return con
@@ -1049,6 +1051,7 @@ def expand_feed(slug):
     return [page_url(slug, base, n) for base in cfg.get("urls", []) for n in range(1, int(cfg.get("pages", 1)) + 1)]
 
 
+DEEP_EVERY_DAYS = 7   # how often each followed page is checked beyond its first page
 FULL_PAGE = 20   # a page with at least this many records may continue on a next page
 SHOP_BUDGET_SECONDS = 14 * 60  # most time one shop may spend on extra label/artist pages; whatever is done by then is saved
 
@@ -1108,7 +1111,13 @@ def run(slug):
         fresh = [L for L in results if L.url not in have]
         have.update(L.url for L in fresh)
         scraped += fresh
-    for base in full_pages:
+    # Deeper pages (older records) change slowly, so each page gets its deep check about once a week, spread over the days.
+    # Set DEEP=1 (or run `python scraper.py <shop> deep`) to check them all now.
+    deep_all = os.environ.get("DEEP") == "1" or "deep" in sys.argv[2:]
+    today_slot = date.today().toordinal() % DEEP_EVERY_DAYS
+    due = [b for b in full_pages if deep_all or zlib.crc32(b.encode()) % DEEP_EVERY_DAYS == today_slot]
+    print(f"  {slug}: {len(full_pages)} pages are full; {len(due)} get a deeper check today")
+    for base in due:
         for n in range(2, MAX_LABEL_PAGES + 1):
             if time.time() - started > SHOP_BUDGET_SECONDS:
                 break
@@ -1291,6 +1300,32 @@ def genre_report(only_unmapped=True):
         print(f"  {shop:<7} {raw:<34} x{n:<4}" + (f" -> {', '.join(mapped)}" if mapped else ""))
 
 
+def run_all_shops():
+    """Scrape every shop at the same time, each in its own process. Each shop still waits politely between its own
+    requests; the shops are different websites, so the whole run takes as long as the slowest one."""
+    import subprocess
+    from concurrent.futures import ThreadPoolExecutor
+    extra = sys.argv[2:]
+
+    def one(slug):
+        t0 = time.time()
+        p = subprocess.run([sys.executable, "-u", os.path.abspath(__file__), slug, *extra],
+                           capture_output=True, text=True)
+        return slug, p.returncode, p.stdout + p.stderr, time.time() - t0
+
+    with ThreadPoolExecutor(max_workers=len(ADAPTERS)) as pool:
+        futures = [pool.submit(one, slug) for slug in ADAPTERS]
+        failed = []
+        for f in futures:
+            slug, code, text, secs = f.result()
+            print(f"\n===== {slug}: {secs / 60:.1f} min {'(FAILED, exit ' + str(code) + ')' if code else ''} =====")
+            print(text.rstrip())
+            if code:
+                failed.append(slug)
+    if failed:
+        print(f"\nThese shops failed and keep yesterday's data: {', '.join(failed)}")
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "init":
@@ -1302,8 +1337,7 @@ if __name__ == "__main__":
     elif cmd == "genres":
         genre_report(only_unmapped=False)
     elif cmd == "all":
-        for slug in ADAPTERS:
-            run(slug)
+        run_all_shops()
         genre_report()
     elif cmd in ADAPTERS:
         run(cmd)
