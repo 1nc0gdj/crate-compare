@@ -334,6 +334,15 @@ dialog::backdrop{background:rgba(21,38,44,.55)}
 .mhead{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:1rem 1.2rem .4rem}
 #mtitle{margin:0;font-size:1.4rem;font-weight:800;font-stretch:115%}
 .mnote{margin:0;padding:0 1.2rem .7rem;color:var(--dim);font-size:.9rem}
+#taste{width:min(70rem,calc(100vw - 2rem))}
+#taste .mhead,#taste>.mnote,#taste .tcols{padding-left:1.2rem;padding-right:1.2rem}
+#taste .tcols{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;overflow:auto;padding-bottom:1rem}
+@media (max-width:700px){#taste .tcols{grid-template-columns:1fr}}
+#taste h3{margin:.4rem 0 0}
+.chips{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.5rem}
+.chip{font:inherit;font-size:.9rem;padding:.25rem .65rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer}
+.chip[aria-pressed=true]{background:var(--ink);color:var(--paper)}
+.chip small{opacity:.7}
 .mtools{display:flex;flex-wrap:wrap;gap:.6rem 1.2rem;align-items:center;padding:.4rem 1.2rem .9rem;border-bottom:1px solid var(--ink)}
 .mtools label{display:flex;gap:.5rem;align-items:center}
 #mlist{list-style:none;margin:0;padding:0 1.2rem 1rem;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(19rem,1fr));column-gap:2.2rem;align-content:start}
@@ -420,8 +429,18 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
   </form>
   <div id="sout" hidden>
     <p class="mnote">Signed in as <strong id="swho"></strong>. Your follows are saved to your account.</p>
-    <div class="mtools"><button type="button" class="followbtn" id="ssignout">Sign out</button></div>
+    <div class="mtools"><button type="button" class="followbtn" id="tagain">Pick my favourites again</button><button type="button" class="followbtn" id="ssignout">Sign out</button></div>
   </div>
+</dialog>
+<dialog id="taste" aria-labelledby="ttitle">
+  <div class="mhead"><h2 id="ttitle">Build your taste profile</h2></div>
+  <p class="mnote">Pick 3 to 5 labels and 3 to 5 artists you love. We'll follow them, so your Release radar and recommendations start from your taste. You can change them any time in Manage labels and Manage artists.</p>
+  <div class="mtools"><input type="search" id="tq" placeholder="Search labels and artists" aria-label="Search labels and artists"><label>Genre <select id="tgenre"></select></label></div>
+  <div class="tcols">
+    <section><h3>Labels</h3><p class="mcount" id="tlc" aria-live="polite"></p><div class="chips" id="tlabels"></div></section>
+    <section><h3>Artists</h3><p class="mcount" id="tac" aria-live="polite"></p><div class="chips" id="tartists"></div></section>
+  </div>
+  <div class="mtools"><button type="button" class="followbtn" id="tsave">Save my picks</button><button type="button" class="followbtn" id="tskip">Skip for now</button><span class="mnote" id="tmsg" aria-live="polite"></span></div>
 </dialog>
 <div class="player" id="player" role="region" aria-label="Preview player" hidden>
   <img id="pimg" alt="" hidden>
@@ -1294,7 +1313,9 @@ async function syncFollows(){
   if (!SB || !session) return;
   try {
     const rows = await sb("/rest/v1/follows?select=label_key") || [];
+    const customised = followed.size !== D.defaults.length || D.defaults.some(k => !followed.has(k));
     if (rows.length) followed = new Set(rows.map(r => r.label_key));      // your account is the source of truth
+    else if (!customised && !onboarded()) { openTaste(); }                  // a brand-new account: start with a taste profile
     else if (followed.size) {                                              // first sign-in: save what you already follow
       await sb("/rest/v1/follows", {method: "POST", headers: {Prefer: "resolution=ignore-duplicates,return=minimal"},
                body: JSON.stringify([...followed].map(k => ({label_key: k, label_name: NAME[k] || k})))});
@@ -1302,6 +1323,56 @@ async function syncFollows(){
     followChanged(); if (!$("manageview").hidden) renderManage(false);
   } catch (err) { if (session) notice("Couldn't sync your follows with your account: " + err.message); }
 }
+// ---- Taste picker: a new account chooses 3 to 5 labels and 3 to 5 artists ----
+const ONBKEY = "crate-compare-onboarded", TMIN = 3, TMAX = 5;
+function onboarded(){ try { return localStorage.getItem(ONBKEY) === "1"; } catch (e) { return false; } }
+function markOnboarded(){ try { localStorage.setItem(ONBKEY, "1"); } catch (e) {} }
+const taste = {labels: new Set(), artists: new Set()}, keyGenres = {};
+D.releases.forEach(r => [r.lkey, ...r.akeys].forEach(k => { const s = keyGenres[k] = keyGenres[k] || new Set(); r.genres.forEach(g => s.add(g)); }));
+function renderTaste(){
+  const q = norm($("tq").value), g = $("tgenre").value;
+  const fill = (host, list, set, noun) => {
+    host.replaceChildren();
+    const picked = list.filter(x => set.has(x.key));
+    const rest = list.filter(x => !set.has(x.key) && (!q || norm(x.name).includes(q)) && (!g || (keyGenres[x.key] && keyGenres[x.key].has(g)))).slice(0, q ? 60 : 36);
+    [...picked, ...rest].forEach(x => {
+      const b = el("button", "chip"); b.type = "button"; b.setAttribute("aria-pressed", set.has(x.key));
+      b.append(document.createTextNode(x.name + " "), el("small", "", String(x.n)));
+      b.onclick = () => {
+        if (set.has(x.key)) set.delete(x.key);
+        else if (set.size >= TMAX) { $("tmsg").textContent = "That's " + TMAX + " " + noun + " already. Tap one you've picked to remove it first."; return; }
+        else set.add(x.key);
+        $("tmsg").textContent = ""; renderTaste();
+      };
+      host.append(b);
+    });
+    if (!picked.length && !rest.length) host.append(el("p", "mnote", "Nothing matches. Try a different search or genre."));
+  };
+  fill($("tlabels"), D.labels, taste.labels, "labels"); fill($("tartists"), D.artists, taste.artists, "artists");
+  $("tlc").textContent = taste.labels.size + " chosen (pick " + TMIN + " to " + TMAX + ")";
+  $("tac").textContent = taste.artists.size + " chosen (pick " + TMIN + " to " + TMAX + ")";
+}
+function openTaste(){
+  taste.labels.clear(); taste.artists.clear(); $("tq").value = ""; $("tmsg").textContent = "";
+  const sel = $("tgenre"), present = new Set(); D.releases.forEach(r => r.genres.forEach(x => present.add(x)));
+  sel.replaceChildren(); [["", "Any genre"], ...(D.genreOrder || []).filter(x => present.has(x)).map(x => [x, x])].forEach(([v, t]) => { const o = el("option", "", t); o.value = v; sel.append(o); });
+  renderTaste();
+  const dlg = $("taste"); dlg.showModal ? dlg.showModal() : dlg.setAttribute("open", "");
+}
+function closeTaste(){ const dlg = $("taste"); dlg.close ? dlg.close() : dlg.removeAttribute("open"); }
+$("tq").oninput = renderTaste; $("tgenre").onchange = renderTaste;
+$("tskip").onclick = () => { markOnboarded(); closeTaste(); };
+$("tsave").onclick = async () => {
+  if (taste.labels.size < TMIN || taste.artists.size < TMIN) { $("tmsg").textContent = "Pick at least " + TMIN + " labels and " + TMIN + " artists, or choose Skip for now."; return; }
+  followed = new Set([...taste.labels, ...taste.artists]); saveFollows(); markOnboarded();
+  if (session) {
+    try { await sb("/rest/v1/follows", {method: "POST", headers: {Prefer: "resolution=ignore-duplicates,return=minimal"},
+                  body: JSON.stringify([...followed].map(k => ({label_key: k, label_name: NAME[k] || k})))}); }
+    catch (err) { notice("Couldn't save your picks to your account: " + err.message); }
+  }
+  closeTaste(); state.src = "both"; followChanged(); location.hash = "#/";
+  notice("Your Release radar is set up from your picks. Change them any time in Manage labels and Manage artists.");
+};
 (function startAccounts(){
   if (!SB) { $("authBtn").hidden = true; return; }
   const h = new URLSearchParams(location.hash.replace(/^#/, ""));
@@ -1317,6 +1388,7 @@ async function syncFollows(){
   }
   updateAuthUi();
   $("authBtn").onclick = () => { if (session) { $("ssignout").onclick(); return; } updateAuthUi(); sdlg.showModal ? sdlg.showModal() : sdlg.setAttribute("open", ""); };
+  $("tagain").onclick = () => { $("sclose").click(); openTaste(); };
   $("sclose").onclick = () => { sdlg.close ? sdlg.close() : sdlg.removeAttribute("open"); };
   sdlg.addEventListener("click", e => { if (e.target === sdlg) $("sclose").click(); });
   $("sform").onsubmit = async e => {
