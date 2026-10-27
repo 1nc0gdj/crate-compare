@@ -334,6 +334,7 @@ dialog::backdrop{background:rgba(21,38,44,.55)}
 .mhead{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:1rem 1.2rem .4rem}
 #mtitle{margin:0;font-size:1.4rem;font-weight:800;font-stretch:115%}
 .mnote{margin:0;padding:0 1.2rem .7rem;color:var(--dim);font-size:.9rem}
+#gate .mhead,#gate>.mnote{padding-left:1.2rem;padding-right:1.2rem}
 #taste{width:min(70rem,calc(100vw - 2rem))}
 #taste .mhead,#taste>.mnote,#taste .tcols{padding-left:1.2rem;padding-right:1.2rem}
 #taste .tcols{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;overflow:auto;padding-bottom:1rem}
@@ -422,6 +423,7 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
 </section>
 <dialog id="signin" aria-labelledby="stitle">
   <div class="mhead"><h2 id="stitle">Sign in</h2><button type="button" class="followbtn" id="sclose">Close</button></div>
+  <p class="mnote" id="snote" hidden></p>
   <form id="sform">
     <p class="mnote">Enter your email and we'll send you a sign-in link. There's no password. Your follows are then saved to your account and follow you to other devices.</p>
     <div class="mtools"><input type="email" id="semail" placeholder="you@example.com" aria-label="Email address" required autocomplete="email"><button type="submit" class="followbtn" id="ssend">Email me a link</button></div>
@@ -431,6 +433,12 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
     <p class="mnote">Signed in as <strong id="swho"></strong>. Your follows are saved to your account.</p>
     <div class="mtools"><button type="button" class="followbtn" id="tagain">Pick my favourites again</button><button type="button" class="followbtn" id="ssignout">Sign out</button></div>
   </div>
+</dialog>
+<dialog id="gate" aria-labelledby="gtitle">
+  <div class="mhead"><h2 id="gtitle">Welcome to Crate Compare</h2></div>
+  <p class="mnote">Follow your favourite labels and artists, and see each new record's price from every shop, delivered to Sydney. Sign in, or tell us what you like and we'll set up your radar in a minute.</p>
+  <div class="mtools"><button type="button" class="followbtn" id="gtaste">Build my taste profile</button><button type="button" class="followbtn" id="gsign">Sign in</button></div>
+  <div class="mtools"><button type="button" class="followbtn" id="gbrowse">Just browse for now</button></div>
 </dialog>
 <dialog id="taste" aria-labelledby="ttitle">
   <div class="mhead"><h2 id="ttitle">Build your taste profile</h2></div>
@@ -1271,7 +1279,7 @@ async function refreshIfNeeded(){
 function updateAuthUi(){
   $("authBtn").textContent = session ? "Sign out" : "Sign in"; $("authBtn").title = session ? "Signed in as " + (session.email || "your account") : "";
   $("sform").hidden = !!session; $("sout").hidden = !session;
-  $("stitle").textContent = session ? "Your account" : "Sign in";
+  $("stitle").textContent = session ? "Your account" : "Sign in or create an account";
   $("swho").textContent = session ? (session.email || "your account") : "";
 }
 function pushFollow(key, on){
@@ -1314,7 +1322,15 @@ async function syncFollows(){
   try {
     const rows = await sb("/rest/v1/follows?select=label_key") || [];
     const customised = followed.size !== D.defaults.length || D.defaults.some(k => !followed.has(k));
-    if (rows.length) followed = new Set(rows.map(r => r.label_key));      // your account is the source of truth
+    let pend = null; try { pend = JSON.parse(localStorage.getItem(PENDKEY) || "null"); } catch (e) {}
+    if (rows.length) { followed = new Set(rows.map(r => r.label_key)); try { localStorage.removeItem(PENDKEY); } catch (e) {} }      // your account is the source of truth
+    else if (pend && pend.length) {                                        // picks made before the account existed
+      followed = new Set(pend);
+      await sb("/rest/v1/follows", {method: "POST", headers: {Prefer: "resolution=ignore-duplicates,return=minimal"},
+               body: JSON.stringify([...followed].map(k => ({label_key: k, label_name: NAME[k] || k})))});
+      try { localStorage.removeItem(PENDKEY); } catch (e) {} markOnboarded();
+      notice("Your account is ready and your picks are saved.");
+    }
     else if (!customised && !onboarded()) { openTaste(); }                  // a brand-new account: start with a taste profile
     else if (followed.size) {                                              // first sign-in: save what you already follow
       await sb("/rest/v1/follows", {method: "POST", headers: {Prefer: "resolution=ignore-duplicates,return=minimal"},
@@ -1324,7 +1340,15 @@ async function syncFollows(){
   } catch (err) { if (session) notice("Couldn't sync your follows with your account: " + err.message); }
 }
 // ---- Taste picker: a new account chooses 3 to 5 labels and 3 to 5 artists ----
-const ONBKEY = "crate-compare-onboarded", TMIN = 3, TMAX = 5;
+const ONBKEY = "crate-compare-onboarded", PENDKEY = "crate-compare-pending-picks", GUESTKEY = "crate-compare-guest", TMIN = 3, TMAX = 5;
+function showGate(){ const g = $("gate"); g.showModal ? g.showModal() : g.setAttribute("open", ""); }
+function closeGate(){ const g = $("gate"); g.close ? g.close() : g.removeAttribute("open"); }
+function openSignin(note){ updateAuthUi(); const n = $("snote"); n.textContent = note || ""; n.hidden = !note; sdlg.showModal ? sdlg.showModal() : sdlg.setAttribute("open", ""); }
+function browseAsGuest(){ try { sessionStorage.setItem(GUESTKEY, "1"); } catch (e) {} closeGate(); }
+$("gtaste").onclick = () => { closeGate(); openTaste(); };
+$("gsign").onclick = () => { closeGate(); openSignin(); };
+$("gbrowse").onclick = browseAsGuest;
+$("gate").addEventListener("cancel", () => { try { sessionStorage.setItem(GUESTKEY, "1"); } catch (e) {} });
 function onboarded(){ try { return localStorage.getItem(ONBKEY) === "1"; } catch (e) { return false; } }
 function markOnboarded(){ try { localStorage.setItem(ONBKEY, "1"); } catch (e) {} }
 const taste = {labels: new Set(), artists: new Set()}, keyGenres = {};
@@ -1354,6 +1378,7 @@ function renderTaste(){
 }
 function openTaste(){
   taste.labels.clear(); taste.artists.clear(); $("tq").value = ""; $("tmsg").textContent = "";
+  $("tskip").textContent = session ? "Skip for now" : "Back";
   const sel = $("tgenre"), present = new Set(); D.releases.forEach(r => r.genres.forEach(x => present.add(x)));
   sel.replaceChildren(); [["", "Any genre"], ...(D.genreOrder || []).filter(x => present.has(x)).map(x => [x, x])].forEach(([v, t]) => { const o = el("option", "", t); o.value = v; sel.append(o); });
   renderTaste();
@@ -1361,10 +1386,17 @@ function openTaste(){
 }
 function closeTaste(){ const dlg = $("taste"); dlg.close ? dlg.close() : dlg.removeAttribute("open"); }
 $("tq").oninput = renderTaste; $("tgenre").onchange = renderTaste;
-$("tskip").onclick = () => { markOnboarded(); closeTaste(); };
+$("tskip").onclick = () => { if (!session) { closeTaste(); showGate(); return; } markOnboarded(); closeTaste(); };
 $("tsave").onclick = async () => {
   if (taste.labels.size < TMIN || taste.artists.size < TMIN) { $("tmsg").textContent = "Pick at least " + TMIN + " labels and " + TMIN + " artists, or choose Skip for now."; return; }
-  followed = new Set([...taste.labels, ...taste.artists]); saveFollows(); markOnboarded();
+  followed = new Set([...taste.labels, ...taste.artists]); saveFollows();
+  if (!session) {                                    // picks are kept until the account exists
+    try { localStorage.setItem(PENDKEY, JSON.stringify([...followed])); } catch (e) {}
+    closeTaste(); state.src = "both"; followChanged(); location.hash = "#/";
+    openSignin("Last step: create your account to save your picks. Enter your email and we'll send a sign-in link. Open it on this device and your picks are saved to your account.");
+    return;
+  }
+  markOnboarded();
   if (session) {
     try { await sb("/rest/v1/follows", {method: "POST", headers: {Prefer: "resolution=ignore-duplicates,return=minimal"},
                   body: JSON.stringify([...followed].map(k => ({label_key: k, label_name: NAME[k] || k})))}); }
@@ -1387,7 +1419,7 @@ $("tsave").onclick = async () => {
     try { session = JSON.parse(localStorage.getItem(AKEY) || "null"); } catch (e) {}
   }
   updateAuthUi();
-  $("authBtn").onclick = () => { if (session) { $("ssignout").onclick(); return; } updateAuthUi(); sdlg.showModal ? sdlg.showModal() : sdlg.setAttribute("open", ""); };
+  $("authBtn").onclick = () => { if (session) { $("ssignout").onclick(); return; } openSignin(); };
   $("tagain").onclick = () => { $("sclose").click(); openTaste(); };
   $("sclose").onclick = () => { sdlg.close ? sdlg.close() : sdlg.removeAttribute("open"); };
   sdlg.addEventListener("click", e => { if (e.target === sdlg) $("sclose").click(); });
@@ -1408,6 +1440,9 @@ $("tsave").onclick = async () => {
     notice("Signed out. Your follows stay on this browser.");
   };
   syncFollows(); syncSaved();
+  let guest = false; try { guest = sessionStorage.getItem(GUESTKEY) === "1"; } catch (e) {}
+  const arriving = !!(h.get("access_token") || h.get("error_description"));
+  if (!session && !arriving && !guest && /^https?:$/.test(location.protocol)) showGate();   // signed-out visitors choose: sign in or build a taste profile
 })();
 
 const nNew = D.releases.filter(isNew).length;
