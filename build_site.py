@@ -296,7 +296,31 @@ button.listen{font:inherit;font-size:.82rem;background:none;border:0;padding:0;c
 .pseek{display:flex;align-items:center;gap:.5rem;font-size:.8rem;font-variant-numeric:tabular-nums}
 .pseek input{flex:1;min-width:0;accent-color:var(--sticker)}
 body.has-player{padding-bottom:8rem}
-@media (max-width:700px){.player{grid-template-columns:3.2rem minmax(0,1fr) auto auto}.pseek{grid-column:1/-1}body.has-player{padding-bottom:12rem}}
+.pacts{display:flex;gap:.1rem;align-items:center}
+.player button[aria-pressed=true]{color:var(--sticker)}
+.player button:disabled{opacity:.35;cursor:default}
+.pqn{font-size:.72rem;font-weight:700;margin-left:.1rem}
+#pqueue{display:flex;align-items:center}
+.pexpand{display:none!important}
+.pq{grid-column:1/-1;order:-1;max-height:min(45vh,22rem);overflow:auto;border-bottom:1px solid rgba(255,255,255,.25);padding-bottom:.5rem}
+.pq[hidden]{display:none}
+.pqhead{display:flex;justify-content:space-between;align-items:center;gap:1rem;font-weight:700}
+.pq ol{list-style:none;margin:.3rem 0 0;padding:0}
+.pq li{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;gap:.2rem;border-top:1px solid rgba(255,255,255,.12)}
+.pq li .qt{text-align:left;justify-items:start;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pq li .qt small{opacity:.7;font-weight:400}
+.pq .qbtn{font-size:.85rem;padding:.3rem .45rem}
+.pq .pqnote{font-size:.85rem;opacity:.8;margin:.3rem 0 0}
+@media (max-width:700px){
+  .player{grid-template-columns:3.2rem minmax(0,1fr) auto auto;grid-template-areas:"q q q q" "img info info exp" "ctl ctl acts acts" "seek seek seek seek" "extra extra extra extra";padding-left:1rem;padding-right:1rem}
+  .pq{grid-area:q} #pimg{grid-area:img} .pinfo{grid-area:info} .pctl{grid-area:ctl} .pacts{grid-area:acts;justify-content:flex-end} .pseek{grid-area:seek} .pextra{grid-area:extra} .pexpand{grid-area:exp;display:grid!important}
+  .player.mini{grid-template-columns:3.2rem minmax(0,1fr) auto auto auto;grid-template-areas:"img info ctl acts exp";gap:.3rem .4rem}
+  .player.mini #pprev,.player.mini .pseek,.player.mini .pextra,.player.mini #pqueue,.player.mini #pclose,.player.mini .pq{display:none!important}
+  .player.mini button{padding:.3rem}
+  .player.mini button svg{width:1.25rem;height:1.25rem}
+  .player.mini .pinfo{cursor:pointer}
+  body.has-player{padding-bottom:13rem} body.has-player.pmini{padding-bottom:5rem}
+}
 button.manage{font:inherit;padding:.3rem .7rem;border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;font-weight:600}
 .savedacts{display:grid;gap:.4rem;margin:.6rem 0 0}
 .basketbtn.alt{background:var(--paper);color:var(--teal);border-color:var(--teal)}
@@ -451,11 +475,13 @@ footer{padding:0 clamp(1rem,4vw,3rem) 3rem;color:var(--dim);font-size:.85rem;max
   <div class="mtools"><button type="button" class="followbtn" id="tsave">Save my picks</button><button type="button" class="followbtn" id="tskip">Skip for now</button><span class="mnote" id="tmsg" aria-live="polite"></span></div>
 </dialog>
 <div class="player" id="player" role="region" aria-label="Preview player" hidden>
+  <div class="pq" id="pq" hidden></div>
   <img id="pimg" alt="" hidden>
-  <div><div class="ptrack" id="ptrack"></div><div class="psub" id="psub"></div></div>
+  <div class="pinfo" id="pinfo"><div class="ptrack" id="ptrack"></div><div class="psub" id="psub"></div></div>
   <div class="pctl"><button type="button" id="pprev" aria-label="Previous track"></button><button type="button" id="pplay" aria-label="Play or pause"></button><button type="button" id="pnext" aria-label="Next track"></button></div>
   <div class="pseek"><span id="pcur">0:00</span><input type="range" id="pseek" min="0" max="1000" value="0" aria-label="Seek"><span id="pdur">0:00</span></div>
-  <button type="button" id="pclose" aria-label="Close player">Close</button>
+  <div class="pacts"><button type="button" id="pbasket" aria-pressed="false" aria-label="Add to basket" title="Basket"></button><button type="button" id="pwish" aria-pressed="false" aria-label="Save to wantlist" title="Wantlist"></button><button type="button" id="pqueue" aria-expanded="false" aria-controls="pq" aria-label="Show queue" title="Queue"></button><button type="button" id="pclose" aria-label="Close player" title="Close"></button></div>
+  <button type="button" class="pexpand" id="pexpand" aria-expanded="false" aria-label="Show all player controls"></button>
   <div class="pextra">
     <label>Volume <input type="range" id="pvol" min="0" max="100" value="100" aria-label="Volume"></label>
     <label>Tempo <input type="range" id="ptempo" min="-16" max="16" step="0.5" value="0" aria-label="Tempo adjust, percent"> <output id="ptempoval">0%</output></label>
@@ -480,7 +506,7 @@ function saveSaved(){ try { localStorage.setItem(BKEY, JSON.stringify([...basket
 function setSaved(r, list, on){
   const set = list === "basket" ? basket : wish;
   on ? set.add(r.key) : set.delete(r.key);
-  saveSaved(); updateManageButton(); pushSaved(r.key, r.title, list, on);
+  saveSaved(); updateManageButton(); pushSaved(r.key, r.title, list, on); refreshSavedUI();
 }
 const norm = s => (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[\s\-_.]+/g, "");
 D.releases.forEach((r, i) => {
@@ -489,6 +515,15 @@ D.releases.forEach((r, i) => {
   r.hay = norm(r.title + " " + r.artists + " " + r.cat);
   r.addedMs = r.added ? Date.parse(r.added.replace(" ", "T") + "Z") : 0;
 });
+// ---- Release queue: whole releases, kept on this device by release key (ids change with each daily build)
+const QKEY = "crate-compare-queue", BYKEY = {};
+D.releases.forEach(r => { BYKEY[r.key] = r; });
+let RQ = [];
+try { RQ = JSON.parse(localStorage.getItem(QKEY) || "[]").filter(k => BYKEY[k]); } catch (e) {}
+function refreshSavedUI(){
+  document.querySelectorAll(".savedacts").forEach(b => { if (b._paint) b._paint(); });
+  if (typeof paintPlayerActs === "function") paintPlayerActs();
+}
 // "New" badges: releases first seen after your previous visit. A visit ends after an hour away,
 // so refreshing the page doesn't clear the badges.
 let since = null;
@@ -667,7 +702,7 @@ function savedButtons(r){
   const box = el("div", "savedacts"), bb = el("button", "basketbtn"), wb = el("button", "basketbtn alt");
   bb.type = wb.type = "button";
   const buyable = r.offers.some(o => avail(o) && o.price != null);
-  const paint = () => {
+  let paint = () => {
     const inB = basket.has(r.key), inW = wish.has(r.key);
     bb.textContent = inB ? "In basket (remove)" : "Add to basket"; bb.setAttribute("aria-pressed", inB);
     wb.textContent = inW ? "On wantlist (remove)" : "Save to wantlist"; wb.setAttribute("aria-pressed", inW);
@@ -675,7 +710,15 @@ function savedButtons(r){
   };
   bb.onclick = () => { setSaved(r, "basket", !basket.has(r.key)); paint(); if (location.hash === "#/wantlist") renderWishlist(); if (location.hash === "#/basket") renderBasket(); };
   wb.onclick = () => { setSaved(r, "wishlist", !wish.has(r.key)); paint(); if (location.hash === "#/wantlist") renderWishlist(); if (location.hash === "#/basket") renderBasket(); };
-  paint(); box.append(bb, wb);
+  box.append(bb, wb);
+  if (r.offers.some(o => o.tracks && o.tracks.length)) {
+    const qb = el("button", "basketbtn alt"); qb.type = "button";
+    const pq = paint;
+    paint = () => { pq(); const inQ = RQ.includes(r.key); qb.textContent = inQ ? "Queued (remove)" : "Add to queue"; qb.setAttribute("aria-pressed", inQ); };
+    qb.onclick = () => toggleQueue(r);
+    box.append(qb);
+  }
+  box._paint = paint; paint();
   return box;
 }
 function artCandidates(u){            // try the biggest version of the cover first, then fall back to the one we scraped
@@ -756,7 +799,13 @@ const ICON = {
   play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>',
   pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>',
   prev: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h2v12H6zM9.5 12 18 6v12z"/></svg>',
-  next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 6h2v12h-2zM6 6l8.5 6L6 18z"/></svg>'
+  next: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 6h2v12h-2zM6 6l8.5 6L6 18z"/></svg>',
+  basket: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5.2 4l.9 2H21l-3.5 7H8.1l-1.1 2H19v2H3.7l2.7-4.9L3.8 4H1V2h3.4z"/></svg>',
+  heart: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.5-9.2C1 8.3 3.2 5 6.6 5c2 0 3.4 1.1 4.4 2.5C12 6.1 13.4 5 15.4 5 18.8 5 21 8.3 19.5 11.8 17.5 16.4 12 21 12 21z"/></svg>',
+  queue: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h13v2H3zm0 5h13v2H3zm0 5h9v2H3zm14 0v-3h2v3h3v2h-3v3h-2v-3h-3v-2z"/></svg>',
+  close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.3 5.7 13.4 10.6 12 12l6.3 6.3-1.4 1.4L12 14.8l-4.9 4.9-1.4-1.4L10.6 13.4 12 12 5.7 5.7l1.4-1.4L12 9.2l4.9-4.9z"/></svg>',
+  up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 14l5-5 5 5z"/></svg>',
+  down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg>'
 };
 const $ = id => document.getElementById(id);
 const audio = new Audio(); audio.preload = "none";
@@ -764,6 +813,77 @@ const P = {queue: [], i: -1, rel: null, offer: null, errors: 0};
 let currentList = [];
 const bar = $("player"), pplay = $("pplay"), pseek = $("pseek");
 $("pprev").innerHTML = ICON.prev; $("pnext").innerHTML = ICON.next; pplay.innerHTML = ICON.play;
+$("pbasket").innerHTML = ICON.basket; $("pwish").innerHTML = ICON.heart; $("pqueue").innerHTML = ICON.queue + '<span class="pqn" id="pqn"></span>'; $("pclose").innerHTML = ICON.close;
+let pClosed = false;
+function saveQueue(){ try { localStorage.setItem(QKEY, JSON.stringify(RQ)); } catch (e) {} refreshSavedUI(); renderQueue(); paintIdle(); }
+function toggleQueue(r){
+  const at = RQ.indexOf(r.key);
+  if (at >= 0) RQ.splice(at, 1); else { RQ.push(r.key); pClosed = false; }
+  saveQueue();
+  if (at < 0) notice(P.rel ? "Added to your queue. It plays after the current record." : "Added to your queue. Press play in the player bar to start it.");
+}
+function playFromQueue(){                       // start the first playable record in the queue; false if none
+  while (RQ.length) {
+    const r = BYKEY[RQ.shift()], o = r && source(r);
+    if (o) { saveQueue(); startTracks(r, o, 0); return true; }
+  }
+  saveQueue(); return false;
+}
+function paintPlayerActs(){
+  const r = P.rel, pb = $("pbasket"), pw = $("pwish");
+  $("pqn").textContent = RQ.length ? String(RQ.length) : "";
+  $("pqueue").setAttribute("aria-label", "Show queue, " + RQ.length + (RQ.length === 1 ? " record" : " records"));
+  if (!r) { pb.disabled = pw.disabled = true; pb.setAttribute("aria-pressed", false); pw.setAttribute("aria-pressed", false); return; }
+  const inB = basket.has(r.key), inW = wish.has(r.key);
+  pb.disabled = !inB && !r.offers.some(o => avail(o) && o.price != null); pw.disabled = false;
+  pb.setAttribute("aria-pressed", inB); pw.setAttribute("aria-pressed", inW);
+  pb.setAttribute("aria-label", inB ? "Remove from basket" : (pb.disabled ? "Not available to buy" : "Add to basket")); pb.title = pb.getAttribute("aria-label");
+  pw.setAttribute("aria-label", inW ? "Remove from wantlist" : "Save to wantlist"); pw.title = pw.getAttribute("aria-label");
+}
+function rerenderSavedPages(){ if (location.hash === "#/wantlist" || location.hash === "#/wishlist") renderWishlist(); if (location.hash === "#/basket") renderBasket(); }
+$("pbasket").onclick = () => { if (P.rel) { setSaved(P.rel, "basket", !basket.has(P.rel.key)); rerenderSavedPages(); } };
+$("pwish").onclick = () => { if (P.rel) { setSaved(P.rel, "wishlist", !wish.has(P.rel.key)); rerenderSavedPages(); } };
+function renderQueue(){
+  const box = $("pq"); box.replaceChildren();
+  const head = el("div", "pqhead"); head.append(el("span", "", "Up next (" + RQ.length + ")"));
+  if (RQ.length) { const c = el("button", "qbtn", "Clear queue"); c.type = "button"; c.onclick = () => { RQ = []; saveQueue(); }; head.append(c); }
+  box.append(head);
+  if (!RQ.length) { box.append(el("p", "pqnote", "Nothing queued. Use Add to queue on any release with previews.")); return; }
+  const ol = el("ol");
+  RQ.forEach((k, i) => {
+    const r = BYKEY[k], li = el("li");
+    const t = el("button", "qt"); t.type = "button"; t.title = "Play now";
+    t.append(document.createTextNode(r.title + " "), el("small", "", r.artists || r.label));
+    t.onclick = () => { RQ.splice(i, 1); const o = source(r); saveQueue(); if (o) startTracks(r, o, 0); };
+    const mk = (icon, label, fn, off) => { const b = el("button", "qbtn"); b.type = "button"; b.innerHTML = icon; b.setAttribute("aria-label", label + ": " + r.title); b.disabled = !!off; b.onclick = fn; return b; };
+    li.append(t,
+      mk(ICON.up, "Move up", () => { [RQ[i - 1], RQ[i]] = [RQ[i], RQ[i - 1]]; saveQueue(); }, i === 0),
+      mk(ICON.down, "Move down", () => { [RQ[i + 1], RQ[i]] = [RQ[i], RQ[i + 1]]; saveQueue(); }, i === RQ.length - 1),
+      mk(ICON.close, "Remove from queue", () => { RQ.splice(i, 1); saveQueue(); }));
+    ol.append(li);
+  });
+  box.append(ol);
+}
+$("pqueue").onclick = () => { const q = $("pq"); q.hidden = !q.hidden; $("pqueue").setAttribute("aria-expanded", !q.hidden); if (!q.hidden) renderQueue(); };
+function paintIdle(){                            // nothing playing: show a slim "your queue" bar if anything is queued
+  if (P.rel) return;
+  const show = RQ.length > 0 && !pClosed;
+  bar.hidden = !show; document.body.classList.toggle("has-player", show);
+  if (show) { $("ptrack").textContent = "Your queue"; $("psub").textContent = RQ.length + (RQ.length === 1 ? " record" : " records") + " ready. Press play to start."; $("pimg").hidden = true; pplay.innerHTML = ICON.play; }
+  paintPlayerActs();
+}
+// minimise / expand on phones (remembered on this device)
+const MINIKEY = "crate-compare-player-mini";
+let mini = true; try { mini = localStorage.getItem(MINIKEY) !== "0"; } catch (e) {}
+function paintMini(){
+  bar.classList.toggle("mini", mini); document.body.classList.toggle("pmini", mini);
+  $("pexpand").innerHTML = mini ? ICON.up : ICON.down;
+  $("pexpand").setAttribute("aria-expanded", !mini); $("pexpand").setAttribute("aria-label", mini ? "Show all player controls" : "Minimise player");
+}
+function setMini(v){ mini = v; try { localStorage.setItem(MINIKEY, v ? "1" : "0"); } catch (e) {} paintMini(); }
+$("pexpand").onclick = () => setMini(!mini);
+$("pinfo").onclick = () => { if (mini && matchMedia("(max-width:700px)").matches) setMini(false); };
+paintMini();
 const clock = s => isFinite(s) ? Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0") : "0:00";
 const source = r => r.offers.find(o => o.tracks && o.tracks.length) || null;
 
@@ -778,6 +898,8 @@ function markPlaying(){
     b.classList.toggle("on", !!P.rel && +b.dataset.rel === P.rel.id && b.dataset.shop === P.offer.shop && +b.dataset.i === P.i));
 }
 function startTracks(r, offer, index){
+  const q = RQ.indexOf(r.key); if (q >= 0) { RQ.splice(q, 1); saveQueue(); }   // playing it now, so it's no longer "up next"
+  pClosed = false;
   P.queue = offer.tracks; P.i = index; P.rel = r; P.offer = offer; P.errors = 0;
   loadTrack();
 }
@@ -790,7 +912,7 @@ function loadTrack(){
   $("ptrack").textContent = t.title;
   $("psub").textContent = [P.rel.artists, P.rel.title].filter(Boolean).join(", ") + ". Preview from " + P.offer.shop;
   const img = $("pimg"); img.style.cursor = "pointer"; img.title = "Go to this release"; img.onclick = goToPlaying; img.hidden = !safe(P.rel.art); if (safe(P.rel.art)) loadArt(img, artCandidates(P.rel.art), () => { img.hidden = true; });
-  markPlaying();
+  markPlaying(); paintPlayerActs();
   try {
     if ("mediaSession" in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({title: t.title, artist: P.rel.artists, album: P.rel.title, artwork: safe(P.rel.art) ? [{src: P.rel.art}] : []});
@@ -801,6 +923,7 @@ function loadTrack(){
 }
 function nextTrack(){
   if (P.i + 1 < P.queue.length) { P.i++; loadTrack(); return; }
+  if (playFromQueue()) return;               // your queue comes first, then the list you're browsing
   const at = currentList.indexOf(P.rel);      // end of this release: carry on to the next one in your list
   if (at >= 0) for (let k = at + 1; k < currentList.length; k++) {
     const o = source(currentList[k]);
@@ -848,12 +971,12 @@ audio.addEventListener("error", () => {
   $("ptrack").textContent = "This preview couldn't be loaded";
   $("psub").textContent = "Try it on " + P.offer.shop + " instead.";
 });
-pplay.onclick = () => { if (!audio.src) return; audio.paused ? audio.play().catch(() => {}) : audio.pause(); };
+pplay.onclick = () => { if (!audio.src) { playFromQueue(); return; } audio.paused ? audio.play().catch(() => {}) : audio.pause(); };
 $("pprev").onclick = prevTrack; $("pnext").onclick = nextTrack;
 pseek.oninput = () => { if (audio.duration) audio.currentTime = pseek.value / 1000 * audio.duration; };
 $("pclose").onclick = () => {
-  audio.pause(); audio.removeAttribute("src"); P.rel = null; bar.hidden = true;
-  document.body.classList.remove("has-player"); markPlaying();
+  audio.pause(); audio.removeAttribute("src"); P.rel = null; bar.hidden = true; pClosed = true; $("pq").hidden = true;
+  document.body.classList.remove("has-player"); markPlaying(); paintPlayerActs();
 };
 document.addEventListener("keydown", e => {
   if (e.code === "Space" && !bar.hidden && !/^(INPUT|SELECT|TEXTAREA|BUTTON|SUMMARY)$/.test(e.target.tagName)) { e.preventDefault(); pplay.click(); }
@@ -1448,6 +1571,7 @@ $("tsave").onclick = async () => {
 const nNew = D.releases.filter(isNew).length;
 if (nNew) metaEl.textContent += " " + nNew + (nNew === 1 ? " release is" : " releases are") + " new since your last visit.";
 render();
+paintIdle(); renderQueue();
 </script>
 </body>
 </html>
